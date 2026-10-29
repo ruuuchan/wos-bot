@@ -58,3 +58,10 @@ pip install -r requirements.txt
 DISCORD_TOKEN=xxxx GUILD_ID=xxxx python bot.py
 ```
 画像に日本語フォント（Noto Sans CJK）を使います。Macなら環境変数 `FONT_REGULAR` / `FONT_BOLD` に手持ちの日本語フォント（例：`/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`、`W6.ttc`）を指定してください。
+
+### VPS（Ubuntu）に置く場合
+root で次の1行を実行すると、専用ユーザー `wosbot` で動くように設定されます（途中でトークンとサーバーIDを聞かれます）。
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/ruuuchan/wos-bot/main/deploy/install.sh)
+```
+更新するときも同じ1行を実行するだけです。トークンを変えたいときは `/etc/wosbot.env` を編集して `systemctl restart wosbot`。
