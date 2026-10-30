@@ -62,14 +62,23 @@ def parse_dt(s):
         return None
 
 
-def hour_options(start):
-    """希望時間帯の選択肢（1時間ごと、最大25個）"""
+def slot_options(start):
+    """希望時間帯の選択肢（SLOT_MINUTES ごと）。値は枠の開始時刻"""
+    step = dt.timedelta(minutes=config.SLOT_MINUTES)
     opts = []
-    for h in range(min(config.HOURS, 25)):
-        t = start + dt.timedelta(hours=h)
-        e = t + dt.timedelta(hours=1)
-        opts.append((f"{t.month}/{t.day}({WEEK[t.weekday()]}) {t.hour}:00〜{e.hour}:00", t.isoformat()))
+    for k in range(config.HOURS * 60 // config.SLOT_MINUTES):
+        t = start + step * k
+        e = t + step
+        opts.append((f"{t.month}/{t.day}({WEEK[t.weekday()]}) {t.hour}:{t.minute:02d}〜{e.hour}:{e.minute:02d}", t.isoformat()))
     return opts
+
+
+def slot_groups(start):
+    """Discordのプルダウンは25個までなので、選択肢を均等に分ける（24時間・30分枠なら24個×2）"""
+    opts = slot_options(start)
+    n = -(-len(opts) // 25)
+    size = -(-len(opts) // n)
+    return [opts[i:i + size] for i in range(0, len(opts), size)]
 
 
 def parse_fc(s):
@@ -88,17 +97,18 @@ def parse_sp(s):
 
 
 def hours_label(hours):
-    """選んだ1時間枠を、続いている所はまとめて「10/5(月) 12:00〜14:00」のように表示"""
+    """選んだ枠を、続いている所はまとめて「10/5(月) 12:00〜14:00」のように表示"""
     ts = sorted(dt.datetime.fromisoformat(h) for h in hours)
     if not ts:
         return "なし"
+    step = dt.timedelta(minutes=config.SLOT_MINUTES)
     spans, s0, prev = [], ts[0], ts[0]
     for t in ts[1:] + [None]:
-        if t is not None and t - prev == dt.timedelta(hours=1):
+        if t is not None and t - prev == step:
             prev = t
             continue
-        e = prev + dt.timedelta(hours=1)
-        spans.append(f"{s0.month}/{s0.day}({WEEK[s0.weekday()]}) {s0.hour}:00〜{e.hour}:00")
+        e = prev + step
+        spans.append(f"{s0.month}/{s0.day}({WEEK[s0.weekday()]}) {s0.hour}:{s0.minute:02d}〜{e.hour}:{e.minute:02d}")
         if t is not None:
             s0 = prev = t
     return "、".join(spans)
@@ -132,7 +142,7 @@ def make_select(placeholder, options, chosen, on_pick, row, min_v=1, max_v=1):
 
 
 # ---------- 入力ステップ ----------
-STEP1_TEXT = "**申請 1/3**　同盟・参加時間・希望時間帯を選んでください\n希望時間帯は《できるだけ多く》選んでください（複数選択できます）"
+STEP1_TEXT = "**申請 1/3**　同盟・参加時間・希望時間帯を選んでください\n希望時間帯は30分ごとです。《できるだけ多く》選んでください（前半・後半どちらも複数選択できます）"
 STEP2_TEXT = (
     "**申請 2/3**　兵舎レベルと英雄を選んでください\n"
     "⚠️ 準備フェーズ中に強化予定がある場合は **強化後** のレベルで\n"
@@ -150,11 +160,16 @@ class Step1(discord.ui.View):
                                   lambda v: draft.update(ally=v[0]), row=0))
         self.add_item(make_select("参加可能時間", lst(config.JOIN_OPTIONS), [draft.get("join")],
                                   lambda v: draft.update(join=v[0]), row=1))
-        opts = hour_options(start)
-        self.add_item(make_select("希望する時間帯（複数選択）", opts, draft.get("hours", []),
-                                  lambda v: draft.update(hours=list(v)), row=2, max_v=len(opts)))
+        groups = slot_groups(start)
+        for gi, opts in enumerate(groups):
+            mine = {v for _, v in opts}
+            first, last = opts[0][0].split(" ")[0] + " " + opts[0][0].split(" ")[1].split("〜")[0], opts[-1][0].split("〜")[1]
+            def pick(v, mine=mine):
+                draft["hours"] = sorted([h for h in draft.get("hours", []) if h not in mine] + list(v))
+            self.add_item(make_select(f"希望時間帯 {first}〜{last}（複数選択可）", opts, draft.get("hours", []),
+                                      pick, row=2 + gi, min_v=0, max_v=len(opts)))
 
-    @discord.ui.button(label="次へ", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="次へ", style=discord.ButtonStyle.primary, row=4)
     async def next(self, interaction: discord.Interaction, _):
         missing = [n for k, n in [("ally", "所属同盟"), ("join", "参加可能時間"), ("hours", "希望時間帯")] if not self.draft.get(k)]
         if missing:
@@ -218,7 +233,7 @@ async def start_apply(interaction: discord.Interaction):
     gid = interaction.guild_id
     start, _ = event(gid)
     draft = db.get_answer(gid, interaction.user.id) or {}
-    valid = {v for _, v in hour_options(start)}
+    valid = {v for _, v in slot_options(start)}
     draft["hours"] = [h for h in draft.get("hours", []) if h in valid]  # 期間が変わっていたら希望時間はリセット
     await interaction.response.send_message(STEP1_TEXT, view=Step1(draft, gid), ephemeral=True)
 
