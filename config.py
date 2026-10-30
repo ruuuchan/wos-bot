@@ -23,7 +23,8 @@ HOURS = 24                            # 対象期間の長さ（時間）
 
 # 実行環境
 TOKEN = os.environ.get("DISCORD_TOKEN", "")
-GUILD_ID = os.environ.get("GUILD_ID")  # 入れるとコマンドがすぐ反映される
+# コマンドを使えるようにするサーバーのID。複数ならカンマ区切り（例：111,222）
+GUILD_IDS = [int(x) for x in os.environ.get("GUILD_ID", "").replace(" ", "").split(",") if x.isdigit()]
 DB_PATH = os.environ.get("DB_PATH", "data.db")
 FONT_REGULAR = os.environ.get("FONT_REGULAR", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 FONT_BOLD = os.environ.get("FONT_BOLD", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")

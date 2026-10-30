@@ -52,7 +52,7 @@ Discordの中で申請を受け付け、`/集計` で「時間割り」と「兵
 2. https://railway.app で「New Project」→「Deploy from GitHub repo」でそのリポジトリを選択（Dockerfileで自動的に動きます）
 3. 「Variables」に以下を追加
    - `DISCORD_TOKEN`：1でコピーしたトークン
-   - `GUILD_ID`：サーバーID（サーバー名を右クリック →「IDをコピー」。開発者モードをONにすると出ます）。入れるとコマンドがすぐ反映されます
+   - `GUILD_ID`：サーバーID（サーバー名を右クリック →「IDをコピー」。開発者モードをONにすると出ます）。複数のサーバーで使うときはカンマ区切り（例：`111,222`）。ここに入れたサーバーでだけコマンドが使えます
 4. 「Volumes」で `/data` にボリュームを追加（再起動しても回答が消えないようにするため）
 
 ### 自分のPCで試す場合
@@ -68,3 +68,8 @@ root で次の1行を実行すると、専用ユーザー `wosbot` で動くよ�
 bash <(curl -fsSL https://raw.githubusercontent.com/ruuuchan/wos-bot/main/deploy/install.sh)
 ```
 更新するときも同じ1行を実行するだけです。トークンを変えたいときは `/etc/wosbot.env` を編集して `systemctl restart wosbot`。
+
+### ほかのサーバーにも入れる
+1. Developer Portal の「Bot」で「Public Bot」をON
+2. そのサーバーの管理者に招待URLを開いてもらう
+3. VPSの `/etc/wosbot.env` の `GUILD_ID=` にそのサーバーIDをカンマ区切りで足して `systemctl restart wosbot`

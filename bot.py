@@ -264,12 +264,22 @@ class Bot(discord.Client):
     async def setup_hook(self):
         self.add_view(Panel())
         auto_post.start()
-        if config.GUILD_ID:
-            g = discord.Object(id=int(config.GUILD_ID))
-            self.tree.copy_global_to(guild=g)
-            await self.tree.sync(guild=g)
+        if config.GUILD_IDS:
+            for gid in config.GUILD_IDS:
+                g = discord.Object(id=gid)
+                self.tree.copy_global_to(guild=g)
+                try:
+                    await self.tree.sync(guild=g)
+                except discord.HTTPException as e:  # まだ招待されていないサーバーなど
+                    print(f"コマンド登録に失敗 guild={gid}: {e!r}")
         else:
             await self.tree.sync()
+
+    async def on_guild_join(self, guild: discord.Guild):
+        """許可済みのサーバーに後から招待されたら、すぐコマンドを使えるようにする"""
+        if guild.id in config.GUILD_IDS:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
 
 
 bot = Bot()
