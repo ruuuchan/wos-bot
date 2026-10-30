@@ -87,14 +87,31 @@ def parse_sp(s):
     return int(s) * 24 if s.isdigit() else None
 
 
+def hours_label(hours):
+    """選んだ1時間枠を、続いている所はまとめて「10/5(月) 12:00〜14:00」のように表示"""
+    ts = sorted(dt.datetime.fromisoformat(h) for h in hours)
+    if not ts:
+        return "なし"
+    spans, s0, prev = [], ts[0], ts[0]
+    for t in ts[1:] + [None]:
+        if t is not None and t - prev == dt.timedelta(hours=1):
+            prev = t
+            continue
+        e = prev + dt.timedelta(hours=1)
+        spans.append(f"{s0.month}/{s0.day}({WEEK[s0.weekday()]}) {s0.hour}:00〜{e.hour}:00")
+        if t is not None:
+            s0 = prev = t
+    return "、".join(spans)
+
+
 def summary_text(a):
-    hrs = len(a.get("hours", []))
+    hrs = hours_label(a.get("hours", []))
     heroes = "、".join(a["heroes"]) or "なし"
     b = a["barracks"]
     return (
         f"同盟：{a['ally']}　参加：{a['join']}\n"
         f"火晶：{a['fc']:,}　加速：{render.sp_label(a['sp_hours'])}\n"
-        f"希望時間帯：{hrs}時間分\n"
+        f"希望時間帯：{hrs}\n"
         f"兵舎：盾{b[0]}／槍{b[1]}／弓{b[2]}\n"
         f"英雄：{heroes}"
     )
