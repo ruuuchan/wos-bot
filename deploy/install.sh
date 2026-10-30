@@ -2,6 +2,7 @@
 # WOS申請ボットを VPS に入れる／更新するスクリプト（Ubuntu用）
 # ・専用ユーザー wosbot だけで動き、ほかのアプリのファイルには触れない
 # ・外からの接続口（ポート）は開けない
+# ・触るのは /opt/wosbot、/etc/wosbot.env、wosbot サービスだけ
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "root で実行してください（先頭に sudo を付ける）"; exit 1; }
 
@@ -9,9 +10,16 @@ REPO="https://github.com/ruuuchan/wos-bot"
 APP=/opt/wosbot
 ENVF=/etc/wosbot.env
 
-echo "== 必要なものを入れています =="
-apt-get update -qq
-apt-get install -y -qq python3-venv fonts-noto-cjk git >/dev/null
+# 足りないものだけ入れる（入っているものは更新しない＝ほかのアプリに影響を出さない）
+need=()
+for p in python3-venv fonts-noto-cjk git; do
+  dpkg -s "$p" >/dev/null 2>&1 || need+=("$p")
+done
+if [ ${#need[@]} -gt 0 ]; then
+  echo "== 必要なものを入れています: ${need[*]} =="
+  apt-get update -qq
+  apt-get install -y -qq --no-upgrade "${need[@]}" >/dev/null
+fi
 
 id wosbot >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wosbot
 

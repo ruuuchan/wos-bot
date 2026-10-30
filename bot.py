@@ -38,6 +38,14 @@ def set_heroes(gid, lst):
     db.set_setting(gid, "heroes", json.dumps(lst, ensure_ascii=False))
 
 
+def alliances(gid):
+    return json.loads(db.get_setting(gid, "alliances", json.dumps(config.ALLIANCES, ensure_ascii=False)))
+
+
+def set_alliances(gid, lst):
+    db.set_setting(gid, "alliances", json.dumps(lst, ensure_ascii=False))
+
+
 def deadline(gid):
     s = db.get_setting(gid, "deadline", "")
     return dt.datetime.strptime(s, FMT) if s else None
@@ -121,7 +129,7 @@ class Step1(discord.ui.View):
         self.draft, self.gid = draft, gid
         start, _ = event(gid)
         lst = lambda xs: [(x, x) for x in xs]
-        self.add_item(make_select("所属同盟", lst(config.ALLIANCES), [draft.get("ally")],
+        self.add_item(make_select("所属同盟", lst(alliances(gid)[:25]), [draft.get("ally")],
                                   lambda v: draft.update(ally=v[0]), row=0))
         self.add_item(make_select("参加可能時間", lst(config.JOIN_OPTIONS), [draft.get("join")],
                                   lambda v: draft.update(join=v[0]), row=1))
@@ -235,11 +243,12 @@ async def build_summary(gid):
         return None
     start, title = event(gid)
     hl = heroes(gid)
+    al = alliances(gid)
 
     def build():
         slots, left = allocate(apps, start, config.SLOT_MINUTES, config.HOURS)
-        return (render.render_schedule(apps, slots, left, start, config.SLOT_MINUTES, config.HOURS, title),
-                render.render_roster(apps, hl))
+        return (render.render_schedule(apps, slots, left, start, config.SLOT_MINUTES, config.HOURS, title, al),
+                render.render_roster(apps, hl, al))
 
     img1, img2 = await asyncio.to_thread(build)
     files = [discord.File(img1, "1_jikanwari.png"), discord.File(img2, "2_hensei.png")]
@@ -343,6 +352,51 @@ async def cmd_setting(interaction: discord.Interaction, 開始: str, 締め切�
     if dl:
         msg += f"\n締め切り：{fmt_dt(dl)} → このチャンネルに自動投稿します"
     await interaction.response.send_message(msg, ephemeral=True)
+
+
+@tree.command(name="同盟追加", description="【運営】同盟の選択肢を追加")
+@app_commands.describe(名前="追加する同盟名", 位置="何番目に入れるか（省略すると最後）")
+@app_commands.guild_only()
+@admin
+async def cmd_ally_add(interaction: discord.Interaction, 名前: str, 位置: app_commands.Range[int, 1, 25] | None = None):
+    gid, name = interaction.guild_id, 名前.strip()
+    al = alliances(gid)
+    if name in al:
+        return await interaction.response.send_message(f"{name} はもう入っています", ephemeral=True)
+    if len(al) >= 25:
+        return await interaction.response.send_message("同盟は25個までです。先に /同盟削除 で減らしてください", ephemeral=True)
+    al.insert((位置 - 1) if 位置 else len(al), name)
+    set_alliances(gid, al)
+    await interaction.response.send_message(f"✅ {name} を追加しました\n" + "、".join(al), ephemeral=True)
+
+
+async def ally_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=a, value=a) for a in alliances(interaction.guild_id) if current.lower() in a.lower()][:25]
+
+
+@tree.command(name="同盟削除", description="【運営】同盟の選択肢を削除")
+@app_commands.describe(名前="削除する同盟")
+@app_commands.autocomplete(名前=ally_autocomplete)
+@app_commands.guild_only()
+@admin
+async def cmd_ally_del(interaction: discord.Interaction, 名前: str):
+    gid = interaction.guild_id
+    al = alliances(gid)
+    if 名前 not in al:
+        return await interaction.response.send_message(f"{名前} は見つかりません", ephemeral=True)
+    al.remove(名前)
+    set_alliances(gid, al)
+    await interaction.response.send_message(f"🗑️ {名前} を削除しました\n" + "、".join(al), ephemeral=True)
+
+
+@tree.command(name="選択肢一覧", description="【運営】今の同盟・英雄の選択肢を確認")
+@app_commands.guild_only()
+@admin
+async def cmd_options(interaction: discord.Interaction):
+    gid = interaction.guild_id
+    await interaction.response.send_message(
+        f"**同盟**（{len(alliances(gid))}）\n" + "、".join(alliances(gid)) +
+        f"\n\n**英雄**（{len(heroes(gid))}）\n" + "、".join(heroes(gid)), ephemeral=True)
 
 
 @tree.command(name="英雄追加", description="【運営】英雄の選択肢を追加")

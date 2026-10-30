@@ -1,8 +1,8 @@
 """設定ファイル。サーバーに合わせてここを書き換えてください。"""
 import os
 
-# 所属同盟（プルダウンに出る順番）
-ALLIANCES = ["ABC", "XYZ", "JPN"]
+# 所属同盟の初期値（Discordの /同盟追加 /同盟削除 で変更できます）
+ALLIANCES = ["RAV", "GaL", "WSS", "RNE", "YEK", "ARK", "MOF", "lgo", "その他の同盟"]
 
 # 兵舎レベルの選択肢（最大25個まで）
 BARRACKS_LEVELS = ["Lv30"] + [f"FC{i}" for i in range(1, 11)]
