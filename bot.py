@@ -217,10 +217,17 @@ class NumModal(discord.ui.Modal):
         self.add_item(self.sp)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if await closed(interaction):
+            return
         fc, sp = parse_fc(self.fc.value), parse_sp(self.sp.value)
         if fc is None or sp is None:
             return await interaction.response.send_message(
                 "数字が読み取れませんでした。火晶は「2500」、加速は「52日13時間」の形で入れ直してください（もう一度「次へ」を押せます）",
+                ephemeral=True)
+        if fc > config.MAX_FC or sp > config.MAX_SP_DAYS * 24:
+            return await interaction.response.send_message(
+                f"数字が大きすぎます（火晶 {fc:,}／加速 {render.sp_label(sp)}）。打ち間違いがないか確認して、もう一度「次へ」から入れ直してください\n"
+                f"上限：火晶 {config.MAX_FC:,}、加速 {config.MAX_SP_DAYS:,}日",
                 ephemeral=True)
         self.draft.update(fc=fc, sp_hours=sp, name=interaction.user.display_name, user_id=interaction.user.id)
         db.save_answer(self.gid, interaction.user.id, self.draft)
@@ -229,7 +236,22 @@ class NumModal(discord.ui.Modal):
             ephemeral=True)
 
 
+async def closed(interaction: discord.Interaction):
+    """締め切り後は申請を受け付けない（サーバー管理権限のある運営は代理入力のため通す）"""
+    dl = deadline(interaction.guild_id)
+    if not dl or dt.datetime.now(JST).replace(tzinfo=None) < dl:
+        return False
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if perms and perms.manage_guild:
+        return False
+    await interaction.response.send_message(
+        f"⏰ 申請は締め切りました（{fmt_dt(dl)}）。変更したいときは運営に連絡してください", ephemeral=True)
+    return True
+
+
 async def start_apply(interaction: discord.Interaction):
+    if await closed(interaction):
+        return
     gid = interaction.guild_id
     start, _ = event(gid)
     draft = db.get_answer(gid, interaction.user.id) or {}

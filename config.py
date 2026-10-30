@@ -5,9 +5,14 @@ import os
 ALLIANCES = ["RAV", "GaL", "WSS", "RNE", "YEK", "ARK", "MOF", "lgo", "その他の同盟"]
 
 # 兵舎レベルの選択肢（最大25個まで）
-BARRACKS_LEVELS = ["Lv30"] + [f"FC{i}" for i in range(1, 11)]
+# 低い順に並べる（FC5からはT11版も）
+BARRACKS_LEVELS = [f"FC{i}" for i in range(1, 5)] + [x for i in range(5, 11) for x in (f"FC{i}", f"FC{i}T11")]
 # これ以上のレベルは編成表で黄色く強調する
 HIGHLIGHT_FROM = "FC7"
+
+# 打ち間違い防止の上限（これを超える数字は受け付けない）
+MAX_FC = 100_000        # 火晶
+MAX_SP_DAYS = 5_000     # 加速の合計日数
 
 # 遠征第1スキルの英雄
 HEROES = ["ジェシー", "ソユン", "リンセツ", "ルムボーガン", "パトリック", "ジンマン", "フレンダー", "ローガン"]
