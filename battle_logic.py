@@ -1,11 +1,13 @@
 """兵器工場・峡谷の振り分け（計算と画像）。
 
 決め方：
-- 軍団ごとに、数値（部隊戦力・総力など）の高い順に並べる
-- 優先度の小さい場所から順に、まとめて人を入れる
-- 「残り（採取・玉拾い・駐屯）」に最低人数を残せないときは、その優先度の場所は今回は空ける
-  （人が少ない日に、全部の施設へ少しずつ散らばらないようにするため）
-- 同じ優先度の場所には、強い人を 1→2→2→1… の順に交互に入れて強さを揃える
+1. どこを取りに行くか：優先度（prio）の小さい場所から順に、まとめて取りに行く。
+   「残り（玉拾いなど）」に最低人数を残せないときは、その優先度の場所は今回は空ける
+   （人が少ない日に、全部の施設へ少しずつ散らばらないようにするため）
+2. 誰を入れるか：取りに行く場所に、強さ順（strength）の小さい場所から強い人を入れる。
+   例：採取は早めに取りに行く（優先度が高い）が、入るのは施設の人の次に強い人（強さ順は後ろ）
+3. 強さ順が同じ場所には、強い人を 1→2→2→1… の順に交互に入れて強さを揃える
+4. 残った人（一番弱い人たち）は「玉拾い」など
 """
 import io
 from itertools import groupby
@@ -24,19 +26,24 @@ DEFAULTS = {
     "foundry": {
         "metric": "部隊戦力",
         "target": 250_000,
-        "reserve": {"name": "採取・玉拾い・駐屯", "min": 4},
+        "reserve": {"name": "玉拾い", "min": 0},
+        # prio = 取りに行く順（小さいほど先）、strength = 強い人を入れる順（小さいほど強い人）
         "places": [
-            {"name": "第1武器試験場", "count": 4, "prio": 1, "points": 74_400},
-            {"name": "第2武器試験場", "count": 4, "prio": 1, "points": 74_400},
-            {"name": "王城", "count": 3, "prio": 2, "points": 75_600},
-            {"name": "第1武器修理工場", "count": 2, "prio": 3, "points": 37_200},
-            {"name": "第2武器修理工場", "count": 2, "prio": 3, "points": 37_200},
-            {"name": "第3武器修理工場", "count": 2, "prio": 4, "points": 37_200},
-            {"name": "第4武器修理工場", "count": 2, "prio": 4, "points": 37_200},
-            {"name": "中継所", "count": 1, "prio": 5, "points": 14_880},
-            {"name": "スチームボイラー", "count": 1, "prio": 5, "points": 14_880},
-            {"name": "兵器倉庫", "count": 1, "prio": 6, "points": 10_080},
-            {"name": "傭兵野営地", "count": 1, "prio": 6, "points": 10_080},
+            {"name": "第1武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
+            {"name": "第2武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
+            {"name": "王城", "count": 3, "prio": 2, "strength": 2, "points": 75_600},
+            {"name": "採取・右上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "note": "＋施設メンバーの5軍・6軍も採取へ"},
+            {"name": "採取・右下", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
+            {"name": "採取・左上", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
+            {"name": "採取・左下", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
+            {"name": "第1武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
+            {"name": "第2武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
+            {"name": "第3武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
+            {"name": "第4武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
+            {"name": "中継所", "count": 1, "prio": 6, "strength": 5, "points": 14_880},
+            {"name": "スチームボイラー", "count": 1, "prio": 6, "strength": 5, "points": 14_880},
+            {"name": "兵器倉庫", "count": 1, "prio": 7, "strength": 6, "points": 10_080},
+            {"name": "傭兵野営地", "count": 1, "prio": 7, "strength": 6, "points": 10_080},
         ],
     },
     "canyon": {
@@ -50,38 +57,47 @@ DEFAULTS = {
 LEGIONS = ["軍団1", "軍団2"]
 
 
+def strength(p):
+    return p.get("strength", p["prio"])
+
+
 def assign(members, places, reserve_min):
     """members: [{name, value}]（同じ軍団の人）。
     戻り値: (taken, skipped, rest)
       taken   = [(place, [member, ...]), ...]  取りに行く場所と入る人（強い順）
       skipped = [place, ...]                   今回は空ける場所
-      rest    = [member, ...]                  残り（採取・玉拾いなど）
+      rest    = [member, ...]                  残り（玉拾いなど）
     """
     pool = sorted(members, key=lambda m: m["value"], reverse=True)
-    taken, skipped = [], []
+    # 1. どこを取りに行くか
+    chosen, skipped, left = [], [], len(pool)
     for _, tier in groupby(sorted(places, key=lambda p: p["prio"]), key=lambda p: p["prio"]):
         tier = list(tier)
         need = sum(p["count"] for p in tier)
         if need == 0:
             continue
-        if len(pool) - need < reserve_min:
+        if left - need < reserve_min:
             skipped.extend(tier)
             continue
+        chosen.extend(tier)
+        left -= need
+    # 2. 誰を入れるか（強さ順）
+    slots = {p["name"]: [] for p in chosen}
+    for _, tier in groupby(sorted(chosen, key=strength), key=strength):
+        tier = list(tier)
+        need = sum(p["count"] for p in tier)
         group, pool = pool[:need], pool[need:]
-        slots = {p["name"]: [] for p in tier}
-        order, forward = list(tier), True
-        i = 0
+        forward, i = True, 0
         while i < len(group):
-            seq = order if forward else list(reversed(order))
-            for p in seq:
+            for p in (tier if forward else tier[::-1]):
                 if i >= len(group):
                     break
                 if len(slots[p["name"]]) < p["count"]:
                     slots[p["name"]].append(group[i])
                     i += 1
             forward = not forward
-        taken.extend((p, slots[p["name"]]) for p in tier)
-    taken.sort(key=lambda t: [x["name"] for x in places].index(t[0]["name"]))
+    order = [x["name"] for x in places]
+    taken = sorted(((p, slots[p["name"]]) for p in chosen), key=lambda t: order.index(t[0]["name"]))
     return taken, skipped, pool
 
 
@@ -97,8 +113,8 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
     # 高さを先に計算
     RH, PH = 44, 58
     h = 200 + (70 if show_points else 0)
-    for _, ms in taken:
-        h += PH + RH * max(1, len(ms)) + 16
+    for p, ms in taken:
+        h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
     if skipped:
         h += 60 + 40 * ((len(skipped) + 2) // 3)
     h += PH + RH * ((len(rest) + 1) // 2 if rest else 1) + 16 + 70
@@ -124,6 +140,9 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
         right = f"{len(ms)}人" + (f"　{p['points']:,}P" if p.get("points") else "")
         d.text((W - 48, y + 12), right, font=f(24, True), fill=HEAD, anchor="ra")
         y += PH
+        if p.get("note"):
+            d.text((72, y + 6), p["note"], font=f(22), fill="#7ee2b8")
+            y += 38
         if not ms:
             d.text((72, y + 8), "（人が足りません）", font=f(24), fill=DIM)
             y += RH

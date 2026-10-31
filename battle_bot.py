@@ -163,24 +163,31 @@ def setup(tree: app_commands.CommandTree, admin):
 
     @tree.command(name="場所追加", description="【運営】施設・場所を追加（同じ名前なら上書き）")
     @app_commands.choices(イベント=EVENT_CHOICES)
-    @app_commands.describe(名前="施設・場所の名前", 人数="入れる人数", 優先="小さいほど先に強い人を入れる（同じ数字は交互に入れる）",
-                           ポイント="占領ポイント（省略可）")
+    @app_commands.describe(名前="施設・場所の名前", 人数="入れる人数",
+                           優先="取りに行く順。小さいほど先に取りに行き、人が足りないと大きい数字から空ける",
+                           強さ順="強い人を入れる順。小さいほど強い人（省略すると優先と同じ。同じ数字は交互に入れる）",
+                           ポイント="占領ポイント（省略可）", メモ="画像に出す一言（例：＋5軍・6軍も採取へ）")
     @app_commands.guild_only()
     @admin
     async def cmd_place_add(interaction: discord.Interaction, イベント: app_commands.Choice[str], 名前: str,
                             人数: app_commands.Range[int, 0, 30], 優先: app_commands.Range[int, 1, 99],
-                            ポイント: app_commands.Range[int, 0, 10_000_000] | None = None):
+                            強さ順: app_commands.Range[int, 1, 99] | None = None,
+                            ポイント: app_commands.Range[int, 0, 10_000_000] | None = None, メモ: str | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
         name = 名前.strip()
-        new = {"name": name, "count": 人数, "prio": 優先, "points": ポイント or 0}
         idx = next((i for i, p in enumerate(c["places"]) if p["name"] == name), None)
+        old = c["places"][idx] if idx is not None else {}
+        new = {"name": name, "count": 人数, "prio": 優先,
+               "strength": 強さ順 if 強さ順 is not None else old.get("strength", 優先),
+               "points": ポイント if ポイント is not None else old.get("points", 0)}
+        note = メモ if メモ is not None else old.get("note")
+        if note:
+            new["note"] = note
         if idx is None:
             c["places"].append(new)
             msg = "追加しました"
         else:
-            if ポイント is None:
-                new["points"] = c["places"][idx].get("points", 0)
             c["places"][idx] = new
             msg = "上書きしました"
         save_cfg(gid, ev, c)
@@ -212,7 +219,7 @@ def setup(tree: app_commands.CommandTree, admin):
     @tree.command(name="振り分け設定", description="【運営】数値の名前・目標ポイント・残りの最低人数などを変更")
     @app_commands.choices(イベント=EVENT_CHOICES)
     @app_commands.describe(数値名="例：部隊戦力、総力", 目標="目標ポイント（0で表示しない）",
-                           最低人数="施設に入れず残しておく最低人数（採取・玉拾いなど）", 残りの名前="例：採取・玉拾い・駐屯")
+                           最低人数="どこにも入れず残しておく最低人数（玉拾いなど）", 残りの名前="例：玉拾い")
     @app_commands.guild_only()
     @admin
     async def cmd_battle_setting(interaction: discord.Interaction, イベント: app_commands.Choice[str],
@@ -255,10 +262,11 @@ def setup(tree: app_commands.CommandTree, admin):
 
 
 def places_text(c):
-    lines = [f"数値：{c['metric']}　目標：{c['target']:,}P　残り「{c['reserve']['name']}」最低 {c['reserve']['min']}人"]
+    lines = [f"数値：{c['metric']}　目標：{c['target']:,}P　残り「{c['reserve']['name']}」最低 {c['reserve']['min']}人",
+             "（優先＝取りに行く順、強さ順＝強い人を入れる順。どちらも小さいほど先）"]
     for p in sorted(c["places"], key=lambda p: p["prio"]):
         pt = f"　{p['points']:,}P" if p.get("points") else ""
-        lines.append(f"優先{p['prio']}　{p['name']}　{p['count']}人{pt}")
+        lines.append(f"優先{p['prio']}・強さ順{p.get('strength', p['prio'])}　{p['name']}　{p['count']}人{pt}")
     if not c["places"]:
         lines.append("（場所がまだありません。/場所追加 で登録してください）")
     return "\n".join(lines)
