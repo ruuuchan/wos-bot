@@ -42,6 +42,7 @@ def proxy_id(name):
 
 
 LEGION_CHOICES = [app_commands.Choice(name=lg, value=lg) for lg in B.LEGIONS]
+TIME_CHOICES = [app_commands.Choice(name=t, value=t) for t in ("21時", "23時")]
 
 
 class BulkModal(discord.ui.Modal):
@@ -176,12 +177,17 @@ def setup(tree: app_commands.CommandTree, admin):
         await interaction.response.send_message("設置しました", ephemeral=True)
 
     @tree.command(name="振り分け", description="【運営】軍団ごとの振り分け画像を投稿")
-    @app_commands.choices(イベント=EVENT_CHOICES)
+    @app_commands.choices(イベント=EVENT_CHOICES, 軍団1の時間=TIME_CHOICES)
+    @app_commands.describe(軍団1の時間="今回の軍団1の時間（選ぶと次回からもその時間になります）")
     @app_commands.guild_only()
     @admin
-    async def cmd_assign(interaction: discord.Interaction, イベント: app_commands.Choice[str]):
+    async def cmd_assign(interaction: discord.Interaction, イベント: app_commands.Choice[str],
+                         軍団1の時間: app_commands.Choice[str] | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
+        if 軍団1の時間:
+            c.setdefault("times", {})["軍団1"] = 軍団1の時間.value
+            save_cfg(gid, ev, c)
         entries = db.all_entries(gid, ev)
         if not entries:
             return await interaction.response.send_message("まだ登録がありません", ephemeral=True)
