@@ -201,7 +201,8 @@ def setup(tree: app_commands.CommandTree, admin):
                                           min_members=c.get("min_members", 0))
                     files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
                     if ev in B.MAPS:
-                        files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"]),
+                        files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"],
+                                                               c.get("min_members", 0)),
                                                   f"{ev}_legion{i}_map.png"))
             return files
 

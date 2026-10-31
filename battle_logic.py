@@ -74,6 +74,11 @@ def strength(p):
     return p.get("strength", p["prio"])
 
 
+def reserve_for(members, reserve, min_members=0):
+    """玉拾いなどの最低人数。参戦できる人数（15人）に届かないときは残さず、全員を施設・採取に回す"""
+    return reserve.get("min", 0) if len(members) >= min_members else 0
+
+
 def assign(members, places, reserve_min, pos=None):
     """members: [{name, value}]（同じ時間帯の人）。
     戻り値: (taken, skipped, rest)
@@ -216,7 +221,7 @@ def fmt_value(v):
 
 def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=(),
                   attack=None, notes=(), time="", min_members=0):
-    taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
+    taken, skipped, rest = assign(members, places, reserve_for(members, reserve, min_members), pos=pos)
     got = sum(p.get("points", 0) for p, _ in taken)
     drop = [p["name"] for p in skipped] + list(abandoned)
     rally = rallies(taken, drop, pos)
@@ -236,7 +241,7 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
     note_lines = wrap(_d, attack.get("note", ""), f(21), W - 140) if strikers else []
     if strikers:
         h += PH + 34 * len(note_lines) + 8 + RH * ((len(strikers) + 1) // 2) + 16
-    show_rest = bool(rest) or reserve.get("min", 0) > 0
+    show_rest = bool(rest) or reserve_for(members, reserve, min_members) > 0
     if show_rest:
         h += PH + RH * ((len(rest) + 1) // 2 if rest else 1) + 16
     h += 44 * len(notes) + (16 if notes else 0)
@@ -366,9 +371,9 @@ MAPS = {"foundry": {"pos": FOUNDRY_MAP, "center": "王室兵器工場"}}
 CARD_W = 236
 
 
-def render_map(ev, event_name, legion, metric, members, places, reserve):
+def render_map(ev, event_name, legion, metric, members, places, reserve, min_members=0):
     pos = MAPS[ev]["pos"]
-    taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
+    taken, skipped, rest = assign(members, places, reserve_for(members, reserve, min_members), pos=pos)
     tk = {p["name"]: ms for p, ms in taken}
     sk = {p["name"] for p in skipped}
     center = MAPS[ev]["center"]
