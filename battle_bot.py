@@ -5,6 +5,7 @@
           /場所追加 /場所削除 /場所一覧 で施設・人数・優先度を変更
 """
 import asyncio
+import hashlib
 import json
 import unicodedata
 
@@ -33,6 +34,46 @@ def save_cfg(gid, ev, c):
 def parse_value(s):
     s = unicodedata.normalize("NFKC", s).replace(",", "").replace(" ", "").strip()
     return int(s) if s.isdigit() else None
+
+
+def proxy_id(name):
+    """Discordにいない人用の番号（名前から作る。本物のDiscordのIDと重ならないようマイナスにする）"""
+    return -int(hashlib.md5(name.strip().encode()).hexdigest()[:12], 16)
+
+
+LEGION_CHOICES = [app_commands.Choice(name=lg, value=lg) for lg in B.LEGIONS]
+
+
+class BulkModal(discord.ui.Modal):
+    """運営がまとめて代理登録する（ゲームのメンバー一覧を見ながら貼り付け）"""
+
+    def __init__(self, ev, gid, legion):
+        super().__init__(title=f"まとめて代理登録　{legion}")
+        self.ev, self.gid, self.legion = ev, gid, legion
+        c = cfg(gid, ev)
+        self.text = discord.ui.TextInput(
+            label=f"1行に1人「名前 {c['metric']}」", style=discord.TextStyle.paragraph,
+            placeholder="あそもぐ 7411\nれむもぐ 8609\nりょうた 6,419", max_length=4000)
+        self.add_item(self.text)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, ng = [], []
+        for line in self.text.value.splitlines():
+            line = unicodedata.normalize("NFKC", line).strip()
+            if not line:
+                continue
+            parts = line.rsplit(None, 1)
+            v = parse_value(parts[1]) if len(parts) == 2 else None
+            if v is None:
+                ng.append(line)
+                continue
+            name = parts[0].strip()
+            db.save_entry(self.gid, self.ev, proxy_id(name), {"name": name, "legion": self.legion, "value": v, "proxy": True})
+            ok.append(f"{name} {v:,}")
+        msg = f"✅ {self.legion} に {len(ok)}人を代理登録しました"
+        if ng:
+            msg += "\n⚠️ 読み取れなかった行（「名前 数値」の形で入れ直してください）：\n" + "\n".join(ng[:20])
+        await interaction.response.send_message(msg[:1990], ephemeral=True)
 
 
 # ---------- メンバーの入力 ----------
@@ -251,6 +292,42 @@ def setup(tree: app_commands.CommandTree, admin):
         db.clear_entries(interaction.guild_id, イベント.value)
         await interaction.response.send_message(f"🗑️ {B.EVENTS[イベント.value]} の登録を全部消しました", ephemeral=True)
 
+    @tree.command(name="代理登録", description="【運営】Discordにいない人を代わりに登録（同じ名前なら上書き）")
+    @app_commands.choices(イベント=EVENT_CHOICES, 軍団=LEGION_CHOICES)
+    @app_commands.describe(名前="ゲーム内の名前", 数値="部隊戦力・総力など（名前の横の数値）")
+    @app_commands.guild_only()
+    @admin
+    async def cmd_proxy(interaction: discord.Interaction, イベント: app_commands.Choice[str],
+                        軍団: app_commands.Choice[str], 名前: str, 数値: str):
+        v = parse_value(数値)
+        if v is None:
+            return await interaction.response.send_message("数値は数字で入れてください（例：7411）", ephemeral=True)
+        name = 名前.strip()
+        db.save_entry(interaction.guild_id, イベント.value, proxy_id(name),
+                      {"name": name, "legion": 軍団.value, "value": v, "proxy": True})
+        await interaction.response.send_message(f"✅ {name}（{軍団.value}／{v:,}）を代理登録しました", ephemeral=True)
+
+    @tree.command(name="まとめて代理登録", description="【運営】Discordにいない人を、名前と数値の一覧を貼り付けてまとめて登録")
+    @app_commands.choices(イベント=EVENT_CHOICES, 軍団=LEGION_CHOICES)
+    @app_commands.guild_only()
+    @admin
+    async def cmd_proxy_bulk(interaction: discord.Interaction, イベント: app_commands.Choice[str], 軍団: app_commands.Choice[str]):
+        await interaction.response.send_modal(BulkModal(イベント.value, interaction.guild_id, 軍団.value))
+
+    async def entry_autocomplete(interaction: discord.Interaction, current: str):
+        ev = getattr(interaction.namespace, "イベント", None) or "foundry"
+        names = [e["name"] for e in db.all_entries(interaction.guild_id, ev) if e.get("proxy")]
+        return [app_commands.Choice(name=n, value=n) for n in names if current in n][:25]
+
+    @tree.command(name="代理削除", description="【運営】代理登録した人を取り消す")
+    @app_commands.choices(イベント=EVENT_CHOICES)
+    @app_commands.autocomplete(名前=entry_autocomplete)
+    @app_commands.guild_only()
+    @admin
+    async def cmd_proxy_del(interaction: discord.Interaction, イベント: app_commands.Choice[str], 名前: str):
+        db.delete_entry(interaction.guild_id, イベント.value, proxy_id(名前))
+        await interaction.response.send_message(f"🗑️ {名前} の代理登録を取り消しました", ephemeral=True)
+
     @tree.command(name="振り分け登録状況", description="【運営】誰が登録したかを確認")
     @app_commands.choices(イベント=EVENT_CHOICES)
     @app_commands.guild_only()
@@ -262,7 +339,7 @@ def setup(tree: app_commands.CommandTree, admin):
         lines = []
         for lg in B.LEGIONS:
             ms = sorted((e for e in es if e["legion"] == lg), key=lambda e: -e["value"])
-            lines.append(f"**{lg}**（{len(ms)}人）\n" + ("\n".join(f"{e['name']}　{e['value']:,}" for e in ms) or "なし"))
+            lines.append(f"**{lg}**（{len(ms)}人）\n" + ("\n".join(f"{e['name']}　{e['value']:,}" + ("（代理）" if e.get("proxy") else "") for e in ms) or "なし"))
         await interaction.response.send_message("\n\n".join(lines)[:1990], ephemeral=True)
 
 
