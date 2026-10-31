@@ -154,7 +154,8 @@ def setup(tree: app_commands.CommandTree, admin):
                 ms = [e for e in entries if e["legion"] == lg]
                 if ms:
                     pos = B.MAPS.get(ev, {}).get("pos")
-                    img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos)
+                    img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos,
+                                          abandoned=c.get("abandoned", []))
                     files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
                     if ev in B.MAPS:
                         files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"]),

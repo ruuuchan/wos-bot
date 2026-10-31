@@ -27,6 +27,8 @@ DEFAULTS = {
         "metric": "部隊戦力",
         "target": 250_000,
         "reserve": {"name": "玉拾い", "min": 4},
+        # 最初から取りに行かない場所（余裕があれば、強い人の2軍で集結をかける）
+        "abandoned": ["王室兵器工場"],
         # prio = 取りに行く順（小さいほど先）、strength = 強い人を入れる順（小さいほど強い人）
         "places": [
             {"name": "第1武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
@@ -139,13 +141,42 @@ def assign(members, places, reserve_min, pos=None):
     return taken, skipped, pool
 
 
+def rallies(taken, targets, pos=None):
+    """今回捨てる場所に、余裕があれば集結をかける人（強い人の2軍）を割り当てる。
+    強い人 = 一番強い人を入れる場所（試験場など）のメンバー。その場所に近い人から、同じ人が重ならないように選ぶ"""
+    homes = [(p, ms) for p, ms in taken if not p.get("march")]
+    if not homes or not targets:
+        return {}
+    top = min(strength(p) for p, _ in homes)
+    cands = sorted(((m, p["name"]) for p, ms in homes if strength(p) == top for m in ms if not m.get("sub")),
+                   key=lambda g: -g[0]["value"])
+    if not cands:
+        return {}
+
+    def dist(a, b):
+        if not pos or a not in pos or b not in pos:
+            return 0
+        (x1, y1), (x2, y2) = pos[a], pos[b]
+        return (x1 - x2) ** 2 + (y1 - y2) ** 2
+
+    out, used = {}, set()
+    for t in targets:
+        pool = [g for g in cands if id(g[0]) not in used] or cands
+        m, home = min(pool, key=lambda g: (dist(t, g[1]), -g[0]["value"]))
+        used.add(id(m))
+        out[t] = m["name"]
+    return out
+
+
 def fmt_value(v):
     return f"{v:,}"
 
 
-def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None):
+def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=()):
     taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
     got = sum(p.get("points", 0) for p, _ in taken)
+    drop = [p["name"] for p in skipped] + list(abandoned)
+    rally = rallies(taken, drop, pos)
     show_points = any(p.get("points") for p in places)
 
     # 高さを先に計算
@@ -153,8 +184,8 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
     h = 200 + (70 if show_points else 0)
     for p, ms in taken:
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
-    if skipped:
-        h += 60 + 40 * ((len(skipped) + 2) // 3)
+    if drop:
+        h += 60 + 40 * len(drop)
     h += PH + RH * ((len(rest) + 1) // 2 if rest else 1) + 16 + 70
 
     img = Image.new("RGB", (W, h), BG)
@@ -201,12 +232,14 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
             y += RH
         y += 16
 
-    if skipped:
-        d.text((48, y + 10), "今回は空ける施設（人数が足りないため）", font=f(24, True), fill=DIM)
+    if drop:
+        d.text((48, y + 10), "今回は捨てる施設 → 余裕があれば強い人の2軍で集結", font=f(24, True), fill=SUB)
         y += 52
-        for i, p in enumerate(skipped):
-            d.text((48 + (i % 3) * 330, y + (i // 3) * 40), f"・{p['name']}", font=f(22), fill=DIM)
-        y += 40 * ((len(skipped) + 2) // 3) + 8
+        for i, name in enumerate(drop):
+            d.text((48, y + i * 40), f"・{name}", font=f(22), fill=DIM)
+            if name in rally:
+                d.text((W - 48, y + i * 40), f"集結：{rally[name]}（2軍）", font=f(22, True), fill="#ffb020", anchor="ra")
+        y += 40 * len(drop) + 8
 
     d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#134e3a")
     d.text((48, y + 10), reserve.get("name", "残り"), font=f(28, True), fill=TXT)
@@ -232,7 +265,7 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
 FOUNDRY_MAP = {
     "スチームボイラー": (330, 250),
     "第4武器修理工場": (690, 250),
-    "傭兵野営地": (510, 400),
+    "傭兵野営地": (520, 415),
     "採取・左上": (250, 440),
     "採取・右上": (800, 440),
     "第1武器試験場": (250, 600),
@@ -244,6 +277,7 @@ FOUNDRY_MAP = {
     "兵器倉庫": (560, 1170),
     "第3武器修理工場": (300, 1330),
     "中継所": (680, 1330),
+    "王室兵器工場": (540, 760),
 }
 MAPS = {"foundry": {"pos": FOUNDRY_MAP, "center": "王室兵器工場"}}
 CARD_W = 236
@@ -254,6 +288,8 @@ def render_map(ev, event_name, legion, metric, members, places, reserve):
     taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
     tk = {p["name"]: ms for p, ms in taken}
     sk = {p["name"] for p in skipped}
+    center = MAPS[ev]["center"]
+    rally = rallies(taken, [p["name"] for p in skipped] + [center], pos)
     H = 1580 + 46 * ((len(rest) + 2) // 3)
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
@@ -266,9 +302,12 @@ def render_map(ev, event_name, legion, metric, members, places, reserve):
         d.polygon([(cx, 740), (cx + 44, 784), (cx, 828), (cx - 44, 784)], outline=col, width=4)
         d.text((cx, 850), lab, font=f(20, True), fill=col, anchor="ma")
     # 中央
-    d.ellipse([440, 660, 640, 860], outline="#4b5d75", width=3, fill="#1f2b40")
-    d.text((540, 742), MAPS[ev]["center"], font=f(22, True), fill=DIM, anchor="mm")
-    d.text((540, 778), "今回は捨てる", font=f(18), fill=DIM, anchor="mm")
+    d.ellipse([415, 640, 665, 890], outline="#4b5d75", width=3, fill="#1f2b40")
+    d.text((540, 730), MAPS[ev]["center"], font=f(22, True), fill=DIM, anchor="mm")
+    d.text((540, 764), "今回は捨てる", font=f(18), fill=DIM, anchor="mm")
+    if center in rally:
+        d.text((540, 806), "余裕があれば集結", font=f(16), fill="#ffb020", anchor="mm")
+        d.text((540, 830), clean(rally[center], d, f(18, True), 170) + "（2軍）", font=f(18, True), fill="#ffb020", anchor="mm")
 
     for name, (cx, cy) in pos.items():
         if name in tk:
@@ -281,7 +320,7 @@ def render_map(ev, event_name, legion, metric, members, places, reserve):
             head, edge, lines = "#1f2b40", "#4b5d75", None
         else:
             continue
-        n = len(lines) if lines else 1
+        n = len(lines) if lines else (3 if name in rally else 1)
         h = 46 + 32 * n + 10
         x0, y0 = cx - CARD_W // 2, cy - h // 2
         d.rounded_rectangle([x0, y0, x0 + CARD_W, y0 + h], 12, fill="#101a2b", outline=edge, width=3)
@@ -289,7 +328,11 @@ def render_map(ev, event_name, legion, metric, members, places, reserve):
         d.text((cx, y0 + 22), clean(name, d, f(21, True), CARD_W - 16), font=f(21, True),
                fill=TXT if lines is not None else DIM, anchor="mm")
         if lines is None:
-            d.text((cx, y0 + 46 + 16), "今回は空ける", font=f(19), fill=DIM, anchor="mm")
+            d.text((cx, y0 + 46 + 16), "今回は捨てる", font=f(19), fill=DIM, anchor="mm")
+            if name in rally:
+                d.text((cx, y0 + 46 + 48), "余裕があれば集結", font=f(17), fill="#ffb020", anchor="mm")
+                d.text((cx, y0 + 46 + 80), clean(rally[name], d, f(19, True), CARD_W - 80) + "（2軍）",
+                       font=f(19, True), fill="#ffb020", anchor="mm")
             continue
         for i, m in enumerate(lines):
             yy = y0 + 46 + 32 * i + 16
