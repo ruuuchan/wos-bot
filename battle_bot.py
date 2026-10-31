@@ -153,8 +153,12 @@ def setup(tree: app_commands.CommandTree, admin):
             for i, lg in enumerate(B.LEGIONS, 1):
                 ms = [e for e in entries if e["legion"] == lg]
                 if ms:
-                    img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"])
-                    files.append(discord.File(img, f"{ev}_legion{i}.png"))
+                    pos = B.MAPS.get(ev, {}).get("pos")
+                    img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos)
+                    files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
+                    if ev in B.MAPS:
+                        files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"]),
+                                                  f"{ev}_legion{i}_map.png"))
             return files
 
         files = await asyncio.to_thread(build)

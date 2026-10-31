@@ -62,7 +62,7 @@ def strength(p):
     return p.get("strength", p["prio"])
 
 
-def assign(members, places, reserve_min):
+def assign(members, places, reserve_min, pos=None):
     """members: [{name, value}]（同じ軍団の人）。
     戻り値: (taken, skipped, rest)
       taken   = [(place, [member, ...]), ...]  取りに行く場所と入る人（強い順）
@@ -112,18 +112,26 @@ def assign(members, places, reserve_min):
                     slots[p["name"]].append(group[i])
                     i += 1
             forward = not forward
-    # 3. 足りない採取などは、施設に入った強い人の5軍・6軍で埋める（同じ人に偏らないよう順番に）
+    # 3. 足りない採取などは、施設に入った人の5軍・6軍で埋める
+    #    地図の位置がわかるときは、その採取場所に一番近い施設の人から出す（同じ人が重ならないように）
     if march_fill:
-        givers = sorted((m for p in chosen if not p.get("march") for m in slots[p["name"]]),
-                        key=lambda m: m["value"], reverse=True)
-        gi = 0
+        givers = [(m, p["name"]) for p in chosen if not p.get("march") for m in slots[p["name"]]]
+        used = set()
+
+        def dist(a, b):
+            if not pos or a not in pos or b not in pos:
+                return 0
+            (x1, y1), (x2, y2) = pos[a], pos[b]
+            return (x1 - x2) ** 2 + (y1 - y2) ** 2
+
         for p, n in march_fill:
             for _ in range(n):
-                if not givers:
+                cands = [g for g in givers if id(g[0]) not in used] or givers
+                if not cands:
                     break
-                g = givers[gi % len(givers)]
-                gi += 1
-                slots[p["name"]].append(dict(g, sub="5軍・6軍"))
+                m, home = min(cands, key=lambda g: (dist(p["name"], g[1]), -g[0]["value"]))
+                used.add(id(m))
+                slots[p["name"]].append(dict(m, sub="5軍・6軍", home=home))
     order = [x["name"] for x in places]
     base = {p["name"]: p for p in places}
     names = {p["name"] for p in chosen} | {p["name"] for p, _ in march_fill}
@@ -135,8 +143,8 @@ def fmt_value(v):
     return f"{v:,}"
 
 
-def render_legion(event_name, legion, metric, members, places, reserve, target):
-    taken, skipped, rest = assign(members, places, reserve.get("min", 0))
+def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None):
+    taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
     got = sum(p.get("points", 0) for p, _ in taken)
     show_points = any(p.get("points") for p in places)
 
@@ -187,7 +195,7 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
                 sx = 72 + d.textlength(nm, font=f(26, True)) + 12
                 d.rounded_rectangle([sx, y + 9, sx + 110, y + 35], 7, fill="#2c3e5a")
                 d.text((sx + 55, y + 22), m["sub"], font=f(17, True), fill="#7ee2b8", anchor="mm")
-                d.text((W - 48, y + 8), "行軍", font=f(22), fill=SUB, anchor="ra")
+                d.text((W - 48, y + 8), f"{m.get('home', '')}から", font=f(22), fill=SUB, anchor="ra")
             else:
                 d.text((W - 48, y + 8), fmt_value(m["value"]), font=f(24), fill=GOLD, anchor="ra")
             y += RH
@@ -213,6 +221,97 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
         d.text((x + 480, yy + 8), fmt_value(m["value"]), font=f(22), fill=GOLD, anchor="ra")
     d.text((48, h - 52), "自動生成", font=f(22), fill="#5f7591")
 
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    buf.seek(0)
+    return buf
+
+
+# ---------- 地図版（兵器工場） ----------
+# 地図上の位置（画像の座標）。名前が一致する場所だけ地図に描く
+FOUNDRY_MAP = {
+    "スチームボイラー": (330, 250),
+    "第4武器修理工場": (690, 250),
+    "傭兵野営地": (510, 400),
+    "採取・左上": (250, 440),
+    "採取・右上": (800, 440),
+    "第1武器試験場": (250, 600),
+    "第2武器修理工場": (840, 640),
+    "第1武器修理工場": (260, 840),
+    "第2武器試験場": (790, 880),
+    "採取・左下": (330, 1060),
+    "採取・右下": (850, 1110),
+    "兵器倉庫": (560, 1170),
+    "第3武器修理工場": (300, 1330),
+    "中継所": (680, 1330),
+}
+MAPS = {"foundry": {"pos": FOUNDRY_MAP, "center": "王室兵器工場"}}
+CARD_W = 236
+
+
+def render_map(ev, event_name, legion, metric, members, places, reserve):
+    pos = MAPS[ev]["pos"]
+    taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
+    tk = {p["name"]: ms for p, ms in taken}
+    sk = {p["name"] for p in skipped}
+    H = 1580 + 46 * ((len(rest) + 2) // 3)
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    d.text((48, 40), f"{event_name} 配置図　{legion}", font=f(50, True), fill=TXT)
+    d.text((48, 110), f"{metric}の高い順 ・ 参戦 {len(members)}人", font=f(26), fill=SUB)
+
+    # 地面とセーフゾーン
+    d.rounded_rectangle([60, 180, W - 60, 1440], 60, fill="#1a2436", outline="#2c3e5a", width=3)
+    for cx, col, lab in [(70, "#54a0ff", "Safe zone"), (W - 70, "#ff6b6b", "Safe zone")]:
+        d.polygon([(cx, 740), (cx + 44, 784), (cx, 828), (cx - 44, 784)], outline=col, width=4)
+        d.text((cx, 850), lab, font=f(20, True), fill=col, anchor="ma")
+    # 中央
+    d.ellipse([440, 660, 640, 860], outline="#4b5d75", width=3, fill="#1f2b40")
+    d.text((540, 742), MAPS[ev]["center"], font=f(22, True), fill=DIM, anchor="mm")
+    d.text((540, 778), "今回は捨てる", font=f(18), fill=DIM, anchor="mm")
+
+    for name, (cx, cy) in pos.items():
+        if name in tk:
+            ms = tk[name]
+            gather = name.startswith("採取")
+            head = "#134e3a" if gather else "#1d3557"
+            edge = "#1dd1a1" if gather else "#54a0ff"
+            lines = ms
+        elif name in sk:
+            head, edge, lines = "#1f2b40", "#4b5d75", None
+        else:
+            continue
+        n = len(lines) if lines else 1
+        h = 46 + 32 * n + 10
+        x0, y0 = cx - CARD_W // 2, cy - h // 2
+        d.rounded_rectangle([x0, y0, x0 + CARD_W, y0 + h], 12, fill="#101a2b", outline=edge, width=3)
+        d.rounded_rectangle([x0, y0, x0 + CARD_W, y0 + 44], 12, fill=head)
+        d.text((cx, y0 + 22), clean(name, d, f(21, True), CARD_W - 16), font=f(21, True),
+               fill=TXT if lines is not None else DIM, anchor="mm")
+        if lines is None:
+            d.text((cx, y0 + 46 + 16), "今回は空ける", font=f(19), fill=DIM, anchor="mm")
+            continue
+        for i, m in enumerate(lines):
+            yy = y0 + 46 + 32 * i + 16
+            if m.get("sub"):
+                label = clean(m["name"], d, f(20, True), CARD_W - 100) + "（5・6軍）"
+                d.text((cx, yy), label, font=f(19, True), fill="#7ee2b8", anchor="mm")
+            else:
+                d.text((cx, yy), clean(m["name"], d, f(21, True), CARD_W - 20), font=f(21, True), fill=TXT, anchor="mm")
+
+    # 地図にない場所（あとから追加した場所など）
+    extra = [(p, ms) for p, ms in taken if p["name"] not in pos]
+    y = 1470
+    if extra:
+        d.text((48, y), "地図外：" + "　".join(f"{p['name']}（{'、'.join(m['name'] for m in ms)}）" for p, ms in extra)[:80],
+               font=f(20), fill=SUB)
+        y += 34
+    # 玉拾い
+    d.rounded_rectangle([24, y, W - 24, y + 48], 10, fill="#134e3a")
+    d.text((48, y + 8), f"{reserve.get('name', '残り')}　{len(rest)}人", font=f(26, True), fill=TXT)
+    y += 58
+    for i, m in enumerate(rest):
+        d.text((48 + (i % 3) * 340, y + (i // 3) * 46), clean(m["name"], d, f(23, True), 320), font=f(23, True), fill=TXT)
     buf = io.BytesIO()
     img.save(buf, "PNG")
     buf.seek(0)
