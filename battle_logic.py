@@ -34,10 +34,11 @@ DEFAULTS = {
             # 王城は捨てて、その分をスチームボイラーと兵器倉庫へ
             {"name": "スチームボイラー", "count": 2, "prio": 2, "strength": 2, "points": 14_880},
             {"name": "兵器倉庫", "count": 1, "prio": 2, "strength": 2, "points": 10_080},
-            {"name": "採取・右上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "note": "＋施設メンバーの5軍・6軍も採取へ"},
-            {"name": "採取・右下", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
-            {"name": "採取・左上", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
-            {"name": "採取・左下", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
+            # march=True：人が足りないときは、施設メンバーの5軍・6軍（余った行軍）で埋める
+            {"name": "採取・右上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
+            {"name": "採取・右下", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
+            {"name": "採取・左上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
+            {"name": "採取・左下", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
             {"name": "第1武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
             {"name": "第2武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
             {"name": "第3武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
@@ -71,10 +72,23 @@ def assign(members, places, reserve_min):
     pool = sorted(members, key=lambda m: m["value"], reverse=True)
     # 1. どこを取りに行くか
     chosen, skipped, left = [], [], len(pool)
+    march_fill = []  # 人を置かず、施設メンバーの5軍・6軍で埋める場所
     for _, tier in groupby(sorted(places, key=lambda p: p["prio"]), key=lambda p: p["prio"]):
         tier = list(tier)
         need = sum(p["count"] for p in tier)
         if need == 0:
+            continue
+        if all(p.get("march") for p in tier):
+            # 行軍で埋められる場所：置ける人数だけ専任を置き、足りない分は5軍・6軍で埋める
+            room = max(0, left - reserve_min)
+            for p in tier:
+                k = min(p["count"], room)
+                room -= k
+                left -= k
+                if k:
+                    chosen.append(dict(p, count=k))
+                if k < p["count"]:
+                    march_fill.append((p, p["count"] - k))
             continue
         if left - need < reserve_min:
             skipped.extend(tier)
@@ -83,6 +97,8 @@ def assign(members, places, reserve_min):
         left -= need
     # 2. 誰を入れるか（強さ順）
     slots = {p["name"]: [] for p in chosen}
+    for p, _ in march_fill:
+        slots.setdefault(p["name"], [])
     for _, tier in groupby(sorted(chosen, key=strength), key=strength):
         tier = list(tier)
         need = sum(p["count"] for p in tier)
@@ -96,8 +112,22 @@ def assign(members, places, reserve_min):
                     slots[p["name"]].append(group[i])
                     i += 1
             forward = not forward
+    # 3. 足りない採取などは、施設に入った強い人の5軍・6軍で埋める（同じ人に偏らないよう順番に）
+    if march_fill:
+        givers = sorted((m for p in chosen if not p.get("march") for m in slots[p["name"]]),
+                        key=lambda m: m["value"], reverse=True)
+        gi = 0
+        for p, n in march_fill:
+            for _ in range(n):
+                if not givers:
+                    break
+                g = givers[gi % len(givers)]
+                gi += 1
+                slots[p["name"]].append(dict(g, sub="5軍・6軍"))
     order = [x["name"] for x in places]
-    taken = sorted(((p, slots[p["name"]]) for p in chosen), key=lambda t: order.index(t[0]["name"]))
+    base = {p["name"]: p for p in places}
+    names = {p["name"] for p in chosen} | {p["name"] for p, _ in march_fill}
+    taken = sorted(((base[n], slots[n]) for n in names), key=lambda t: order.index(t[0]["name"]))
     return taken, skipped, pool
 
 
@@ -137,7 +167,9 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
     for p, ms in taken:
         d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#1d3557")
         d.text((48, y + 10), p["name"], font=f(28, True), fill=TXT)
-        right = f"{len(ms)}人" + (f"　{p['points']:,}P" if p.get("points") else "")
+        nm_ = sum(1 for m in ms if not m.get("sub"))
+        nk_ = len(ms) - nm_
+        right = (f"{nm_}人" if nm_ else "") + (f"{'＋' if nm_ else ''}行軍{nk_}" if nk_ else "") + (f"　{p['points']:,}P" if p.get("points") else "")
         d.text((W - 48, y + 12), right, font=f(24, True), fill=HEAD, anchor="ra")
         y += PH
         if p.get("note"):
@@ -149,8 +181,15 @@ def render_legion(event_name, legion, metric, members, places, reserve, target):
         for i, m in enumerate(ms):
             if i % 2 == 0:
                 d.rectangle([24, y, W - 24, y + RH], fill=STRIPE)
-            d.text((72, y + 7), clean(m["name"], d, f(26, True), 640), font=f(26, True), fill=TXT)
-            d.text((W - 48, y + 8), fmt_value(m["value"]), font=f(24), fill=GOLD, anchor="ra")
+            nm = clean(m["name"], d, f(26, True), 520)
+            d.text((72, y + 7), nm, font=f(26, True), fill=TXT)
+            if m.get("sub"):
+                sx = 72 + d.textlength(nm, font=f(26, True)) + 12
+                d.rounded_rectangle([sx, y + 9, sx + 110, y + 35], 7, fill="#2c3e5a")
+                d.text((sx + 55, y + 22), m["sub"], font=f(17, True), fill="#7ee2b8", anchor="mm")
+                d.text((W - 48, y + 8), "行軍", font=f(22), fill=SUB, anchor="ra")
+            else:
+                d.text((W - 48, y + 8), fmt_value(m["value"]), font=f(24), fill=GOLD, anchor="ra")
             y += RH
         y += 16
 
