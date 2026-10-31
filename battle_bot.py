@@ -1,7 +1,7 @@
 """兵器工場・峡谷の振り分け（Discord側）。bot.py から setup() で登録する。
 
-メンバー：パネルのボタン → 軍団を選ぶ → 数値（部隊戦力・総力など）を入力
-運営　　：/振り分け で軍団ごとの振り分け画像を投稿
+メンバー：パネルのボタン → 参加する時間（21:00／23:00）を選ぶ → 数値（部隊戦力・総力など）を入力
+運営　　：/振り分け で時間ごとの振り分け画像を投稿
           /場所追加 /場所削除 /場所一覧 で施設・人数・優先度を変更
 """
 import asyncio
@@ -42,7 +42,6 @@ def proxy_id(name):
 
 
 LEGION_CHOICES = [app_commands.Choice(name=lg, value=lg) for lg in B.LEGIONS]
-TIME_CHOICES = [app_commands.Choice(name=t, value=t) for t in ("21時", "23時")]
 
 
 class BulkModal(discord.ui.Modal):
@@ -128,7 +127,7 @@ async def start_entry(interaction: discord.Interaction, ev: str):
     entry = db.get_entry(gid, ev, interaction.user.id)
     now = f"\n今の登録：{entry['legion']}／{entry['value']:,}" if entry else ""
     await interaction.response.send_message(
-        f"**{B.EVENTS[ev]}**　参加する軍団を選んでください{now}", view=LegionView(ev, gid, entry), ephemeral=True)
+        f"**{B.EVENTS[ev]}**　参加する時間を選んでください{now}", view=LegionView(ev, gid, entry), ephemeral=True)
 
 
 class BattlePanel(discord.ui.View):
@@ -169,25 +168,20 @@ def setup(tree: app_commands.CommandTree, admin):
         c = cfg(interaction.guild_id, ev)
         embed = discord.Embed(
             title=f"⚔️ {B.EVENTS[ev]} 振り分け登録",
-            description=(f"下のボタンから **参加する軍団** と **{c['metric']}**（名前の横の数値）を登録してください。\n"
+            description=(f"下のボタンから **参加する時間（21:00／23:00）** と **{c['metric']}**（名前の横の数値）を登録してください。\n"
                          "名前の入力は不要です。数値が変わったら、もう一度押せば上書きされます。\n"
                          "参加しなくなったときは、ボタンから取り消せます。"),
             color=0xE67E22)
         await interaction.channel.send(embed=embed, view=BattlePanel(ev))
         await interaction.response.send_message("設置しました", ephemeral=True)
 
-    @tree.command(name="振り分け", description="【運営】軍団ごとの振り分け画像を投稿")
-    @app_commands.choices(イベント=EVENT_CHOICES, 軍団1の時間=TIME_CHOICES)
-    @app_commands.describe(軍団1の時間="今回の軍団1の時間（選ぶと次回からもその時間になります）")
+    @tree.command(name="振り分け", description="【運営】時間ごと（21:00／23:00）の振り分け画像を投稿")
+    @app_commands.choices(イベント=EVENT_CHOICES)
     @app_commands.guild_only()
     @admin
-    async def cmd_assign(interaction: discord.Interaction, イベント: app_commands.Choice[str],
-                         軍団1の時間: app_commands.Choice[str] | None = None):
+    async def cmd_assign(interaction: discord.Interaction, イベント: app_commands.Choice[str]):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
-        if 軍団1の時間:
-            c.setdefault("times", {})["軍団1"] = 軍団1の時間.value
-            save_cfg(gid, ev, c)
         entries = db.all_entries(gid, ev)
         if not entries:
             return await interaction.response.send_message("まだ登録がありません", ephemeral=True)
@@ -212,7 +206,7 @@ def setup(tree: app_commands.CommandTree, admin):
             return files
 
         files = await asyncio.to_thread(build)
-        counts = "、".join(f"{lg} {sum(e['legion'] == lg for e in entries)}人" for lg in B.LEGIONS)
+        counts = "、".join(f"{lg}の部 {sum(e['legion'] == lg for e in entries)}人" for lg in B.LEGIONS)
         await interaction.followup.send(content=f"⚔️ **{B.EVENTS[ev]} 振り分け**（{counts}）", files=files)
 
     @tree.command(name="場所追加", description="【運営】施設・場所を追加（同じ名前なら上書き）")
@@ -282,14 +276,14 @@ def setup(tree: app_commands.CommandTree, admin):
     @app_commands.describe(数値名="例：部隊戦力、総力", 目標="目標ポイント（0で表示しない）",
                            最低人数="どこにも入れず残しておく最低人数（玉拾いなど）", 残りの名前="例：玉拾い",
                            攻め人数="強い順に何人を「攻め」にするか（0で出さない）", 攻めの説明="攻めの人への指示",
-                           注意書き="画像に出す注意書き（「なし」で消す）", 軍団1の時間="例：21時", 軍団2の時間="例：22時")
+                           注意書き="画像に出す注意書き（「なし」で消す）")
     @app_commands.guild_only()
     @admin
     async def cmd_battle_setting(interaction: discord.Interaction, イベント: app_commands.Choice[str],
                                  数値名: str | None = None, 目標: app_commands.Range[int, 0, 100_000_000] | None = None,
                                  最低人数: app_commands.Range[int, 0, 30] | None = None, 残りの名前: str | None = None,
                                  攻め人数: app_commands.Range[int, 0, 30] | None = None, 攻めの説明: str | None = None,
-                                 注意書き: str | None = None, 軍団1の時間: str | None = None, 軍団2の時間: str | None = None):
+                                 注意書き: str | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
         if 数値名:
@@ -309,9 +303,6 @@ def setup(tree: app_commands.CommandTree, admin):
             c["attack"] = a
         if 注意書き:
             c["notes"] = [] if 注意書き.strip() == "なし" else [注意書き.strip()]
-        for lg, t in (("軍団1", 軍団1の時間), ("軍団2", 軍団2の時間)):
-            if t is not None:
-                c.setdefault("times", {})[lg] = t.strip()
         save_cfg(gid, ev, c)
         await interaction.response.send_message(f"✅ 設定しました\n\n{places_text(c)}", ephemeral=True)
 
@@ -324,26 +315,26 @@ def setup(tree: app_commands.CommandTree, admin):
         await interaction.response.send_message(f"🗑️ {B.EVENTS[イベント.value]} の登録を全部消しました", ephemeral=True)
 
     @tree.command(name="代理登録", description="【運営】Discordにいない人を代わりに登録（同じ名前なら上書き）")
-    @app_commands.choices(イベント=EVENT_CHOICES, 軍団=LEGION_CHOICES)
+    @app_commands.choices(イベント=EVENT_CHOICES, 時間=LEGION_CHOICES)
     @app_commands.describe(名前="ゲーム内の名前", 数値="部隊戦力・総力など（名前の横の数値）")
     @app_commands.guild_only()
     @admin
     async def cmd_proxy(interaction: discord.Interaction, イベント: app_commands.Choice[str],
-                        軍団: app_commands.Choice[str], 名前: str, 数値: str):
+                        時間: app_commands.Choice[str], 名前: str, 数値: str):
         v = parse_value(数値)
         if v is None:
             return await interaction.response.send_message("数値は数字で入れてください（例：7411）", ephemeral=True)
         name = 名前.strip()
         db.save_entry(interaction.guild_id, イベント.value, proxy_id(name),
-                      {"name": name, "legion": 軍団.value, "value": v, "proxy": True})
-        await interaction.response.send_message(f"✅ {name}（{軍団.value}／{v:,}）を代理登録しました", ephemeral=True)
+                      {"name": name, "legion": 時間.value, "value": v, "proxy": True})
+        await interaction.response.send_message(f"✅ {name}（{時間.value}／{v:,}）を代理登録しました", ephemeral=True)
 
     @tree.command(name="まとめて代理登録", description="【運営】Discordにいない人を、名前と数値の一覧を貼り付けてまとめて登録")
-    @app_commands.choices(イベント=EVENT_CHOICES, 軍団=LEGION_CHOICES)
+    @app_commands.choices(イベント=EVENT_CHOICES, 時間=LEGION_CHOICES)
     @app_commands.guild_only()
     @admin
-    async def cmd_proxy_bulk(interaction: discord.Interaction, イベント: app_commands.Choice[str], 軍団: app_commands.Choice[str]):
-        await interaction.response.send_modal(BulkModal(イベント.value, interaction.guild_id, 軍団.value))
+    async def cmd_proxy_bulk(interaction: discord.Interaction, イベント: app_commands.Choice[str], 時間: app_commands.Choice[str]):
+        await interaction.response.send_modal(BulkModal(イベント.value, interaction.guild_id, 時間.value))
 
     async def entry_autocomplete(interaction: discord.Interaction, current: str):
         ev = getattr(interaction.namespace, "イベント", None) or "foundry"
@@ -382,8 +373,6 @@ def places_text(c):
         lines.append(f"攻め：強い順に{a['count']}人（{a.get('note', '')}）")
     for n in c.get("notes", []):
         lines.append(f"注意書き：{n}")
-    if c.get("times"):
-        lines.append("時間：" + "、".join(f"{k} {v}" for k, v in c["times"].items() if v))
     for p in sorted(c["places"], key=lambda p: p["prio"]):
         pt = f"　{p['points']:,}P" if p.get("points") else ""
         cnt = "均等" if p.get("fill") else f"{p['count']}人"

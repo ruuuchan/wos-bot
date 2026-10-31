@@ -54,7 +54,6 @@ DEFAULTS = {
         "metric": "総力",
         "target": 0,
         "reserve": {"name": "遊撃・その他", "min": 0},
-        "times": {"軍団1": "21時"},
         # fill=True：人数を決めず、来た人を強さが偏らないよう均等に分ける
         "places": [
             {"name": "A　30,31方面", "count": 0, "prio": 1, "strength": 1, "fill": True},
@@ -67,7 +66,8 @@ DEFAULTS = {
     },
 }
 
-LEGIONS = ["軍団1", "軍団2"]
+# 参加する時間帯（メンバーには「軍団1・2」より時間のほうがわかりやすいため、時間で分ける）
+LEGIONS = ["21:00", "23:00"]
 
 
 def strength(p):
@@ -75,7 +75,7 @@ def strength(p):
 
 
 def assign(members, places, reserve_min, pos=None):
-    """members: [{name, value}]（同じ軍団の人）。
+    """members: [{name, value}]（同じ時間帯の人）。
     戻り値: (taken, skipped, rest)
       taken   = [(place, [member, ...]), ...]  取りに行く場所と入る人（強い順）
       skipped = [place, ...]                   今回は空ける場所
@@ -243,7 +243,7 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
 
     img = Image.new("RGB", (W, h), BG)
     d = ImageDraw.Draw(img)
-    d.text((48, 40), f"{event_name} 振り分け　{legion}" + (f"（{time}）" if time else ""), font=f(50, True), fill=TXT)
+    d.text((48, 40), f"{event_name} 振り分け　{legion}の部", font=f(50, True), fill=TXT)
     d.text((48, 110), f"{metric}の高い順 ・ 参戦 {len(members)}人", font=f(26), fill=SUB)
     y = 160
     if short:
@@ -376,7 +376,7 @@ def render_map(ev, event_name, legion, metric, members, places, reserve):
     H = 1580 + 46 * ((len(rest) + 2) // 3)
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
-    d.text((48, 40), f"{event_name} 配置図　{legion}", font=f(50, True), fill=TXT)
+    d.text((48, 40), f"{event_name} 配置図　{legion}の部", font=f(50, True), fill=TXT)
     d.text((48, 110), f"{metric}の高い順 ・ 参戦 {len(members)}人", font=f(26), fill=SUB)
 
     # 地面とセーフゾーン
