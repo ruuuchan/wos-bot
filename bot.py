@@ -20,6 +20,7 @@ import battle_bot
 from allocate import allocate
 
 WEEK = "月火水木金土日"
+OWNER_IDS: set[int] = set()
 JST = dt.timezone(dt.timedelta(hours=9))  # 日本は夏時間なし
 FMT = "%Y-%m-%d %H:%M"
 
@@ -242,8 +243,7 @@ async def closed(interaction: discord.Interaction):
     dl = deadline(interaction.guild_id)
     if not dl or dt.datetime.now(JST).replace(tzinfo=None) < dl:
         return False
-    perms = getattr(interaction.user, "guild_permissions", None)
-    if perms and (perms.manage_guild or perms.manage_channels):
+    if is_staff(interaction):
         return False
     await interaction.response.send_message(
         f"⏰ 申請は締め切りました（{fmt_dt(dl)}）。変更したいときは運営に連絡してください", ephemeral=True)
@@ -317,6 +317,12 @@ class Bot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        # ボットの持ち主（Developer Portalでボットを作った人）は、どのサーバーでも運営コマンドを使える
+        try:
+            info = await self.application_info()
+            OWNER_IDS.update(m.id for m in info.team.members) if info.team else OWNER_IDS.add(info.owner.id)
+        except discord.HTTPException as e:
+            print(f"持ち主の確認に失敗: {e!r}")
         self.add_view(Panel())
         battle_bot.add_views(self)
         auto_post.start()
@@ -340,9 +346,91 @@ class Bot(discord.Client):
 
 bot = Bot()
 tree = bot.tree
-# 運営コマンドを使える人：「チャンネルの管理」権限を持っている人（サーバー管理者も含む）
-# Discordのサーバー設定 →「連携サービス」→ このボット から、ロールごとに個別に許可・禁止することもできる
-admin = app_commands.default_permissions(manage_channels=True)
+
+
+# ---------- 運営かどうか ----------
+# 運営コマンドを使える人：
+#   ・ボットの持ち主
+#   ・「チャンネルの管理」か「サーバーの管理」権限を持っている人
+#   ・/運営追加 で登録した人・ロール（Discordの権限がなくても使える）
+# コマンド自体は全員に表示され、運営以外が使うと「運営だけが使えます」と返す
+def staff_list(gid):
+    return json.loads(db.get_setting(gid, "staff", '{"users": [], "roles": []}'))
+
+
+def is_staff(interaction: discord.Interaction) -> bool:
+    u = interaction.user
+    if u.id in OWNER_IDS:
+        return True
+    perms = getattr(u, "guild_permissions", None)
+    if perms and (perms.administrator or perms.manage_guild or perms.manage_channels):
+        return True
+    st = staff_list(interaction.guild_id)
+    if u.id in st["users"]:
+        return True
+    return any(r.id in st["roles"] for r in getattr(u, "roles", []))
+
+
+admin = app_commands.check(is_staff)
+
+
+@tree.error
+async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CheckFailure):
+        msg = "このコマンドは運営だけが使えます"
+    else:
+        print(f"コマンドでエラー: {error!r}")
+        msg = "エラーが起きました。運営に連絡してください"
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
+@tree.command(name="運営追加", description="【運営】運営コマンドを使える人・ロールを追加（Discordの権限がなくても使えるようになる）")
+@app_commands.describe(メンバー="追加する人", ロール="追加するロール")
+@app_commands.guild_only()
+@admin
+async def cmd_staff_add(interaction: discord.Interaction, メンバー: discord.Member | None = None, ロール: discord.Role | None = None):
+    if not メンバー and not ロール:
+        return await interaction.response.send_message("メンバーかロールを選んでください", ephemeral=True)
+    st = staff_list(interaction.guild_id)
+    if メンバー and メンバー.id not in st["users"]:
+        st["users"].append(メンバー.id)
+    if ロール and ロール.id not in st["roles"]:
+        st["roles"].append(ロール.id)
+    db.set_setting(interaction.guild_id, "staff", json.dumps(st))
+    await interaction.response.send_message("✅ 追加しました\n" + staff_text(interaction.guild, st), ephemeral=True)
+
+
+@tree.command(name="運営削除", description="【運営】運営コマンドを使える人・ロールから外す")
+@app_commands.describe(メンバー="外す人", ロール="外すロール")
+@app_commands.guild_only()
+@admin
+async def cmd_staff_del(interaction: discord.Interaction, メンバー: discord.Member | None = None, ロール: discord.Role | None = None):
+    st = staff_list(interaction.guild_id)
+    if メンバー:
+        st["users"] = [x for x in st["users"] if x != メンバー.id]
+    if ロール:
+        st["roles"] = [x for x in st["roles"] if x != ロール.id]
+    db.set_setting(interaction.guild_id, "staff", json.dumps(st))
+    await interaction.response.send_message("🗑️ 外しました\n" + staff_text(interaction.guild, st), ephemeral=True)
+
+
+@tree.command(name="運営一覧", description="【運営】/運営追加 で登録した人・ロールを確認")
+@app_commands.guild_only()
+@admin
+async def cmd_staff_list(interaction: discord.Interaction):
+    await interaction.response.send_message(staff_text(interaction.guild, staff_list(interaction.guild_id)), ephemeral=True)
+
+
+def staff_text(guild, st):
+    users = [f"<@{x}>" for x in st["users"]]
+    roles = [f"<@&{x}>" for x in st["roles"]]
+    return ("登録した人：" + ("、".join(users) or "なし") + "\n登録したロール：" + ("、".join(roles) or "なし") +
+            "\n（このほか、ボットの持ち主と「チャンネルの管理」「サーバーの管理」権限のある人も使えます）")
+
+
 battle_bot.setup(tree, admin)  # 兵器工場・峡谷の振り分け
 
 
