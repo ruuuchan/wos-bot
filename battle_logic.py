@@ -31,7 +31,9 @@ DEFAULTS = {
         "places": [
             {"name": "第1武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
             {"name": "第2武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
-            {"name": "王城", "count": 3, "prio": 2, "strength": 2, "points": 75_600},
+            # 王城は捨てて、その分をスチームボイラーと兵器倉庫へ
+            {"name": "スチームボイラー", "count": 2, "prio": 2, "strength": 2, "points": 14_880},
+            {"name": "兵器倉庫", "count": 1, "prio": 2, "strength": 2, "points": 10_080},
             {"name": "採取・右上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "note": "＋施設メンバーの5軍・6軍も採取へ"},
             {"name": "採取・右下", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
             {"name": "採取・左上", "count": 1, "prio": 3, "strength": 7, "points": 28_750},
@@ -41,8 +43,6 @@ DEFAULTS = {
             {"name": "第3武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
             {"name": "第4武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
             {"name": "中継所", "count": 1, "prio": 6, "strength": 5, "points": 14_880},
-            {"name": "スチームボイラー", "count": 1, "prio": 6, "strength": 5, "points": 14_880},
-            {"name": "兵器倉庫", "count": 1, "prio": 7, "strength": 6, "points": 10_080},
             {"name": "傭兵野営地", "count": 1, "prio": 7, "strength": 6, "points": 10_080},
         ],
     },
