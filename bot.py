@@ -16,6 +16,7 @@ from discord.ext import tasks
 import config
 import db
 import render
+import battle_bot
 from allocate import allocate
 
 WEEK = "月火水木金土日"
@@ -317,6 +318,7 @@ class Bot(discord.Client):
 
     async def setup_hook(self):
         self.add_view(Panel())
+        battle_bot.add_views(self)
         auto_post.start()
         if config.GUILD_IDS:
             for gid in config.GUILD_IDS:
@@ -339,6 +341,7 @@ class Bot(discord.Client):
 bot = Bot()
 tree = bot.tree
 admin = app_commands.default_permissions(manage_guild=True)
+battle_bot.setup(tree, admin)  # 兵器工場・峡谷の振り分け
 
 
 @tree.command(name="申請", description="準備フェーズの申請（何度でも直せます）")

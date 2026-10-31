@@ -61,3 +61,37 @@ def clear_numbers(guild_id: int):
 
 def guilds_with(key: str):
     return _conn.execute("SELECT guild_id, value FROM settings WHERE key=?", (key,)).fetchall()
+
+
+# ---- 兵器工場・峡谷の振り分け用 ----
+_conn.execute("""CREATE TABLE IF NOT EXISTS battle_entries(
+    guild_id INTEGER, event TEXT, user_id INTEGER, data TEXT,
+    PRIMARY KEY(guild_id, event, user_id))""")
+_conn.commit()
+
+
+def save_entry(guild_id: int, event: str, user_id: int, data: dict):
+    _conn.execute("INSERT OR REPLACE INTO battle_entries VALUES(?,?,?,?)",
+                  (guild_id, event, user_id, json.dumps(data, ensure_ascii=False)))
+    _conn.commit()
+
+
+def get_entry(guild_id: int, event: str, user_id: int):
+    row = _conn.execute("SELECT data FROM battle_entries WHERE guild_id=? AND event=? AND user_id=?",
+                        (guild_id, event, user_id)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def delete_entry(guild_id: int, event: str, user_id: int):
+    _conn.execute("DELETE FROM battle_entries WHERE guild_id=? AND event=? AND user_id=?", (guild_id, event, user_id))
+    _conn.commit()
+
+
+def all_entries(guild_id: int, event: str):
+    rows = _conn.execute("SELECT data FROM battle_entries WHERE guild_id=? AND event=?", (guild_id, event)).fetchall()
+    return [json.loads(r[0]) for r in rows]
+
+
+def clear_entries(guild_id: int, event: str):
+    _conn.execute("DELETE FROM battle_entries WHERE guild_id=? AND event=?", (guild_id, event))
+    _conn.commit()
