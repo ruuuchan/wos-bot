@@ -203,7 +203,8 @@ def setup(tree: app_commands.CommandTree, admin):
                     pos = B.MAPS.get(ev, {}).get("pos")
                     img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos,
                                           abandoned=c.get("abandoned", []), attack=c.get("attack"),
-                                          notes=c.get("notes", []), time=c.get("times", {}).get(lg, ""))
+                                          notes=c.get("notes", []), time=c.get("times", {}).get(lg, ""),
+                                          min_members=c.get("min_members", 0))
                     files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
                     if ev in B.MAPS:
                         files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"]),

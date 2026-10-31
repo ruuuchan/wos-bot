@@ -26,6 +26,7 @@ DEFAULTS = {
     "foundry": {
         "metric": "部隊戦力",
         "target": 250_000,
+        "min_members": 15,  # これより少ないと参戦できない
         "reserve": {"name": "玉拾い", "min": 4},
         # 最初から取りに行かない場所（余裕があれば、強い人の2軍で集結をかける）
         "abandoned": ["王室兵器工場"],
@@ -109,6 +110,14 @@ def assign(members, places, reserve_min, pos=None):
                     march_fill.append((p, p["count"] - k))
             continue
         if left - need < reserve_min:
+            if not chosen:
+                # 一番大事な場所（試験場など）は空けない。人が足りなければ人数を減らして均等に入れる
+                avail = max(0, left - reserve_min) or min(left, len(tier))
+                for i, p in enumerate(tier):
+                    k = min(p["count"], avail // len(tier) + (1 if i < avail % len(tier) else 0))
+                    chosen.append(dict(p, count=k))
+                    left -= k
+                continue
             skipped.extend(tier)
             continue
         chosen.extend(tier)
@@ -206,17 +215,18 @@ def fmt_value(v):
 
 
 def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=(),
-                  attack=None, notes=(), time=""):
+                  attack=None, notes=(), time="", min_members=0):
     taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
     got = sum(p.get("points", 0) for p, _ in taken)
     drop = [p["name"] for p in skipped] + list(abandoned)
     rally = rallies(taken, drop, pos)
     strikers = sorted(members, key=lambda m: -m["value"])[:attack["count"]] if attack and attack.get("count") else []
     show_points = any(p.get("points") for p in places)
+    short = max(0, min_members - len(members))
 
     # 高さを先に計算
     RH, PH = 44, 58
-    h = 200 + (70 if show_points else 0)
+    h = 200 + (70 if show_points else 0) + (70 if short else 0)
     for p, ms in taken:
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
     if drop:
@@ -236,6 +246,11 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
     d.text((48, 40), f"{event_name} 振り分け　{legion}" + (f"（{time}）" if time else ""), font=f(50, True), fill=TXT)
     d.text((48, 110), f"{metric}の高い順 ・ 参戦 {len(members)}人", font=f(26), fill=SUB)
     y = 160
+    if short:
+        d.rounded_rectangle([24, y, W - 24, y + 56], 10, fill="#5a1e2a")
+        d.text((48, y + 12), f"⚠ {min_members}人に届いていません（あと{short}人）。このままだと参戦できません",
+               font=f(24, True), fill="#ff9fb0")
+        y += 70
     if show_points:
         ok = target and got >= target
         col = "#1dd1a1" if ok else ("#ffb020" if target else TXT)
