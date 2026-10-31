@@ -26,7 +26,7 @@ DEFAULTS = {
     "foundry": {
         "metric": "部隊戦力",
         "target": 250_000,
-        "reserve": {"name": "玉拾い", "min": 0},
+        "reserve": {"name": "玉拾い", "min": 4},
         # prio = 取りに行く順（小さいほど先）、strength = 強い人を入れる順（小さいほど強い人）
         "places": [
             {"name": "第1武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
