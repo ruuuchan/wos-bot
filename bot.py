@@ -243,7 +243,7 @@ async def closed(interaction: discord.Interaction):
     if not dl or dt.datetime.now(JST).replace(tzinfo=None) < dl:
         return False
     perms = getattr(interaction.user, "guild_permissions", None)
-    if perms and perms.manage_guild:
+    if perms and (perms.manage_guild or perms.manage_channels):
         return False
     await interaction.response.send_message(
         f"⏰ 申請は締め切りました（{fmt_dt(dl)}）。変更したいときは運営に連絡してください", ephemeral=True)
@@ -340,7 +340,9 @@ class Bot(discord.Client):
 
 bot = Bot()
 tree = bot.tree
-admin = app_commands.default_permissions(manage_guild=True)
+# 運営コマンドを使える人：「チャンネルの管理」権限を持っている人（サーバー管理者も含む）
+# Discordのサーバー設定 →「連携サービス」→ このボット から、ロールごとに個別に許可・禁止することもできる
+admin = app_commands.default_permissions(manage_channels=True)
 battle_bot.setup(tree, admin)  # 兵器工場・峡谷の振り分け
 
 
