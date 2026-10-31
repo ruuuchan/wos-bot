@@ -53,7 +53,16 @@ DEFAULTS = {
         "metric": "総力",
         "target": 0,
         "reserve": {"name": "遊撃・その他", "min": 0},
-        "places": [],
+        "times": {"軍団1": "21時"},
+        # fill=True：人数を決めず、来た人を強さが偏らないよう均等に分ける
+        "places": [
+            {"name": "A　30,31方面", "count": 0, "prio": 1, "strength": 1, "fill": True},
+            {"name": "B　18,27方面", "count": 0, "prio": 1, "strength": 1, "fill": True},
+            {"name": "C　28,19方面", "count": 0, "prio": 1, "strength": 1, "fill": True},
+        ],
+        "attack": {"count": 5, "title": "真ん中を攻める時",
+                   "note": "この人たちの1軍のみ真ん中へ送る。その他のメンバーは持ち場の状況を見つつ、相手の真ん中へのルートを断ちにいく"},
+        "notes": ["真ん中を守る時：10〜15人の駐屯を維持できるように、誰でもいいので送る"],
     },
 }
 
@@ -77,6 +86,13 @@ def assign(members, places, reserve_min, pos=None):
     march_fill = []  # 人を置かず、施設メンバーの5軍・6軍で埋める場所
     for _, tier in groupby(sorted(places, key=lambda p: p["prio"]), key=lambda p: p["prio"]):
         tier = list(tier)
+        if all(p.get("fill") for p in tier):
+            # 均等に分ける場所：残った人を全部、強さが偏らないように分ける
+            avail = max(0, left - reserve_min)
+            for i, p in enumerate(tier):
+                chosen.append(dict(p, count=avail // len(tier) + (1 if i < avail % len(tier) else 0)))
+            left -= avail
+            continue
         need = sum(p["count"] for p in tier)
         if need == 0:
             continue
@@ -168,15 +184,34 @@ def rallies(taken, targets, pos=None):
     return out
 
 
+def wrap(d, text, font, width):
+    """幅に合わせて折り返す（行頭に「、。」が来ないように）"""
+    lines, cur = [], ""
+    for ch in text:
+        if d.textlength(cur + ch, font=font) > width and cur:
+            if ch in "、。）」":
+                cur += ch
+                continue
+            lines.append(cur)
+            cur = ch
+        else:
+            cur += ch
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def fmt_value(v):
     return f"{v:,}"
 
 
-def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=()):
+def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=(),
+                  attack=None, notes=(), time=""):
     taken, skipped, rest = assign(members, places, reserve.get("min", 0), pos=pos)
     got = sum(p.get("points", 0) for p, _ in taken)
     drop = [p["name"] for p in skipped] + list(abandoned)
     rally = rallies(taken, drop, pos)
+    strikers = sorted(members, key=lambda m: -m["value"])[:attack["count"]] if attack and attack.get("count") else []
     show_points = any(p.get("points") for p in places)
 
     # 高さを先に計算
@@ -186,11 +221,19 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
     if drop:
         h += 60 + 40 * len(drop)
-    h += PH + RH * ((len(rest) + 1) // 2 if rest else 1) + 16 + 70
+    h += 70
+    _d = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    note_lines = wrap(_d, attack.get("note", ""), f(21), W - 140) if strikers else []
+    if strikers:
+        h += PH + 34 * len(note_lines) + 8 + RH * ((len(strikers) + 1) // 2) + 16
+    show_rest = bool(rest) or reserve.get("min", 0) > 0
+    if show_rest:
+        h += PH + RH * ((len(rest) + 1) // 2 if rest else 1) + 16
+    h += 44 * len(notes) + (16 if notes else 0)
 
     img = Image.new("RGB", (W, h), BG)
     d = ImageDraw.Draw(img)
-    d.text((48, 40), f"{event_name} 振り分け　{legion}", font=f(50, True), fill=TXT)
+    d.text((48, 40), f"{event_name} 振り分け　{legion}" + (f"（{time}）" if time else ""), font=f(50, True), fill=TXT)
     d.text((48, 110), f"{metric}の高い順 ・ 参戦 {len(members)}人", font=f(26), fill=SUB)
     y = 160
     if show_points:
@@ -228,6 +271,10 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
                 d.text((sx + 55, y + 22), m["sub"], font=f(17, True), fill="#7ee2b8", anchor="mm")
                 d.text((W - 48, y + 8), f"{m.get('home', '')}から", font=f(22), fill=SUB, anchor="ra")
             else:
+                if any(m is st for st in strikers):
+                    sx = 72 + d.textlength(nm, font=f(26, True)) + 12
+                    d.rounded_rectangle([sx, y + 9, sx + 60, y + 35], 7, fill="#5a1e2a")
+                    d.text((sx + 30, y + 22), "攻め", font=f(17, True), fill="#ff9fb0", anchor="mm")
                 d.text((W - 48, y + 8), fmt_value(m["value"]), font=f(24), fill=GOLD, anchor="ra")
             y += RH
         y += 16
@@ -241,17 +288,38 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
                 d.text((W - 48, y + i * 40), f"集結：{rally[name]}（2軍）", font=f(22, True), fill="#ffb020", anchor="ra")
         y += 40 * len(drop) + 8
 
-    d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#134e3a")
-    d.text((48, y + 10), reserve.get("name", "残り"), font=f(28, True), fill=TXT)
-    d.text((W - 48, y + 12), f"{len(rest)}人", font=f(24, True), fill="#7ee2b8", anchor="ra")
-    y += PH
-    if not rest:
-        d.text((72, y + 8), "（なし）", font=f(24), fill=DIM)
-    for i, m in enumerate(rest):
-        x = 48 + (i % 2) * 508
-        yy = y + (i // 2) * RH
-        d.text((x + 24, yy + 7), clean(m["name"], d, f(24, True), 300), font=f(24, True), fill=TXT)
-        d.text((x + 480, yy + 8), fmt_value(m["value"]), font=f(22), fill=GOLD, anchor="ra")
+    if strikers:
+        d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#5a1e2a")
+        d.text((48, y + 10), attack.get("title", "攻め"), font=f(28, True), fill=TXT)
+        d.text((W - 48, y + 12), f"{len(strikers)}人", font=f(24, True), fill="#ff9fb0", anchor="ra")
+        y += PH
+        for k, ln in enumerate(note_lines):
+            d.text((72, y + 4 + 34 * k), ln, font=f(21), fill="#ff9fb0")
+        y += 34 * len(note_lines) + 8
+        for i, m in enumerate(strikers):
+            x = 48 + (i % 2) * 508
+            yy = y + (i // 2) * RH
+            d.text((x + 24, yy + 7), clean(m["name"], d, f(24, True), 300), font=f(24, True), fill=TXT)
+            d.text((x + 480, yy + 8), fmt_value(m["value"]), font=f(22), fill=GOLD, anchor="ra")
+        y += RH * ((len(strikers) + 1) // 2) + 16
+    for n in notes:
+        d.text((48, y + 6), f"・{n}", font=f(22, True), fill=HEAD)
+        y += 44
+    if notes:
+        y += 16
+
+    if show_rest:
+        d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#134e3a")
+        d.text((48, y + 10), reserve.get("name", "残り"), font=f(28, True), fill=TXT)
+        d.text((W - 48, y + 12), f"{len(rest)}人", font=f(24, True), fill="#7ee2b8", anchor="ra")
+        y += PH
+        if not rest:
+            d.text((72, y + 8), "（なし）", font=f(24), fill=DIM)
+        for i, m in enumerate(rest):
+            x = 48 + (i % 2) * 508
+            yy = y + (i // 2) * RH
+            d.text((x + 24, yy + 7), clean(m["name"], d, f(24, True), 300), font=f(24, True), fill=TXT)
+            d.text((x + 480, yy + 8), fmt_value(m["value"]), font=f(22), fill=GOLD, anchor="ra")
     d.text((48, h - 52), "自動生成", font=f(22), fill="#5f7591")
 
     buf = io.BytesIO()

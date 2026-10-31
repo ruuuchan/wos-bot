@@ -196,7 +196,8 @@ def setup(tree: app_commands.CommandTree, admin):
                 if ms:
                     pos = B.MAPS.get(ev, {}).get("pos")
                     img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos,
-                                          abandoned=c.get("abandoned", []))
+                                          abandoned=c.get("abandoned", []), attack=c.get("attack"),
+                                          notes=c.get("notes", []), time=c.get("times", {}).get(lg, ""))
                     files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
                     if ev in B.MAPS:
                         files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"]),
@@ -212,13 +213,15 @@ def setup(tree: app_commands.CommandTree, admin):
     @app_commands.describe(名前="施設・場所の名前", 人数="入れる人数",
                            優先="取りに行く順。小さいほど先に取りに行き、人が足りないと大きい数字から空ける",
                            強さ順="強い人を入れる順。小さいほど強い人（省略すると優先と同じ。同じ数字は交互に入れる）",
-                           ポイント="占領ポイント（省略可）", メモ="画像に出す一言（例：＋5軍・6軍も採取へ）")
+                           ポイント="占領ポイント（省略可）", メモ="画像に出す一言（例：＋5軍・6軍も採取へ）",
+                           均等="はい＝人数を決めず、来た人を同じ優先の場所へ均等に分ける（峡谷の方面など）")
     @app_commands.guild_only()
     @admin
     async def cmd_place_add(interaction: discord.Interaction, イベント: app_commands.Choice[str], 名前: str,
                             人数: app_commands.Range[int, 0, 30], 優先: app_commands.Range[int, 1, 99],
                             強さ順: app_commands.Range[int, 1, 99] | None = None,
-                            ポイント: app_commands.Range[int, 0, 10_000_000] | None = None, メモ: str | None = None):
+                            ポイント: app_commands.Range[int, 0, 10_000_000] | None = None, メモ: str | None = None,
+                            均等: bool | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
         name = 名前.strip()
@@ -230,6 +233,11 @@ def setup(tree: app_commands.CommandTree, admin):
         note = メモ if メモ is not None else old.get("note")
         if note:
             new["note"] = note
+        for k in ("march",):
+            if old.get(k):
+                new[k] = old[k]
+        if (均等 if 均等 is not None else old.get("fill")):
+            new["fill"] = True
         if idx is None:
             c["places"].append(new)
             msg = "追加しました"
@@ -265,12 +273,16 @@ def setup(tree: app_commands.CommandTree, admin):
     @tree.command(name="振り分け設定", description="【運営】数値の名前・目標ポイント・残りの最低人数などを変更")
     @app_commands.choices(イベント=EVENT_CHOICES)
     @app_commands.describe(数値名="例：部隊戦力、総力", 目標="目標ポイント（0で表示しない）",
-                           最低人数="どこにも入れず残しておく最低人数（玉拾いなど）", 残りの名前="例：玉拾い")
+                           最低人数="どこにも入れず残しておく最低人数（玉拾いなど）", 残りの名前="例：玉拾い",
+                           攻め人数="強い順に何人を「攻め」にするか（0で出さない）", 攻めの説明="攻めの人への指示",
+                           注意書き="画像に出す注意書き（「なし」で消す）", 軍団1の時間="例：21時", 軍団2の時間="例：22時")
     @app_commands.guild_only()
     @admin
     async def cmd_battle_setting(interaction: discord.Interaction, イベント: app_commands.Choice[str],
                                  数値名: str | None = None, 目標: app_commands.Range[int, 0, 100_000_000] | None = None,
-                                 最低人数: app_commands.Range[int, 0, 30] | None = None, 残りの名前: str | None = None):
+                                 最低人数: app_commands.Range[int, 0, 30] | None = None, 残りの名前: str | None = None,
+                                 攻め人数: app_commands.Range[int, 0, 30] | None = None, 攻めの説明: str | None = None,
+                                 注意書き: str | None = None, 軍団1の時間: str | None = None, 軍団2の時間: str | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
         if 数値名:
@@ -281,6 +293,18 @@ def setup(tree: app_commands.CommandTree, admin):
             c["reserve"]["min"] = 最低人数
         if 残りの名前:
             c["reserve"]["name"] = 残りの名前.strip()
+        if 攻め人数 is not None or 攻めの説明:
+            a = c.get("attack") or {"count": 0, "title": "真ん中を攻める時", "note": ""}
+            if 攻め人数 is not None:
+                a["count"] = 攻め人数
+            if 攻めの説明:
+                a["note"] = 攻めの説明.strip()
+            c["attack"] = a
+        if 注意書き:
+            c["notes"] = [] if 注意書き.strip() == "なし" else [注意書き.strip()]
+        for lg, t in (("軍団1", 軍団1の時間), ("軍団2", 軍団2の時間)):
+            if t is not None:
+                c.setdefault("times", {})[lg] = t.strip()
         save_cfg(gid, ev, c)
         await interaction.response.send_message(f"✅ 設定しました\n\n{places_text(c)}", ephemeral=True)
 
@@ -346,9 +370,17 @@ def setup(tree: app_commands.CommandTree, admin):
 def places_text(c):
     lines = [f"数値：{c['metric']}　目標：{c['target']:,}P　残り「{c['reserve']['name']}」最低 {c['reserve']['min']}人",
              "（優先＝取りに行く順、強さ順＝強い人を入れる順。どちらも小さいほど先）"]
+    a = c.get("attack") or {}
+    if a.get("count"):
+        lines.append(f"攻め：強い順に{a['count']}人（{a.get('note', '')}）")
+    for n in c.get("notes", []):
+        lines.append(f"注意書き：{n}")
+    if c.get("times"):
+        lines.append("時間：" + "、".join(f"{k} {v}" for k, v in c["times"].items() if v))
     for p in sorted(c["places"], key=lambda p: p["prio"]):
         pt = f"　{p['points']:,}P" if p.get("points") else ""
-        lines.append(f"優先{p['prio']}・強さ順{p.get('strength', p['prio'])}　{p['name']}　{p['count']}人{pt}")
+        cnt = "均等" if p.get("fill") else f"{p['count']}人"
+        lines.append(f"優先{p['prio']}・強さ順{p.get('strength', p['prio'])}　{p['name']}　{cnt}{pt}")
     if not c["places"]:
         lines.append("（場所がまだありません。/場所追加 で登録してください）")
     return "\n".join(lines)
