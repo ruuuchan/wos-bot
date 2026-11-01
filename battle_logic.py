@@ -24,30 +24,31 @@ EVENTS = {
 
 DEFAULTS = {
     "foundry": {
+        # mode="rally"：施設ごとに「集結主」を決める方式
+        "mode": "rally",
         "metric": "部隊戦力",
         "target": 250_000,
         "min_members": 15,  # これより少ないと参戦できない
+        "leader_min": 2 / 3,  # 集結主になれるのは、トップの人のこの割合以上の人だけ
         "reserve": {"name": "玉拾い", "min": 4},
-        # 最初から取りに行かない場所（余裕があれば、強い人の2軍で集結をかける）
         "abandoned": ["王室兵器工場"],
-        # prio = 取りに行く順（小さいほど先）、strength = 強い人を入れる順（小さいほど強い人）
+        # count = 集結主の人数、need = 必要な強さ（トップの人を1とした割合）、prio = 強い人を回す順
         "places": [
-            {"name": "第1武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
-            {"name": "第2武器試験場", "count": 4, "prio": 1, "strength": 1, "points": 74_400},
-            # 王城は捨てて、その分をスチームボイラーと兵器倉庫へ
-            {"name": "スチームボイラー", "count": 2, "prio": 2, "strength": 2, "points": 14_880},
-            {"name": "兵器倉庫", "count": 1, "prio": 2, "strength": 2, "points": 10_080},
-            # march=True：人が足りないときは、施設メンバーの5軍・6軍（余った行軍）で埋める
-            {"name": "採取・右上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
-            {"name": "採取・右下", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
-            {"name": "採取・左上", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
-            {"name": "採取・左下", "count": 1, "prio": 3, "strength": 7, "points": 28_750, "march": True},
-            {"name": "第1武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
-            {"name": "第2武器修理工場", "count": 2, "prio": 4, "strength": 3, "points": 37_200},
-            {"name": "第3武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
-            {"name": "第4武器修理工場", "count": 2, "prio": 5, "strength": 4, "points": 37_200},
-            {"name": "中継所", "count": 1, "prio": 6, "strength": 5, "points": 14_880},
-            {"name": "傭兵野営地", "count": 1, "prio": 7, "strength": 6, "points": 10_080},
+            {"name": "第1武器試験場", "count": 2, "prio": 1, "need": 0, "points": 74_400},
+            {"name": "第2武器試験場", "count": 2, "prio": 1, "need": 0, "points": 74_400},
+            {"name": "スチームボイラー", "count": 1, "prio": 2, "need": 0.75, "points": 14_880},
+            {"name": "兵器倉庫", "count": 1, "prio": 3, "need": 0.75, "points": 10_080},
+            {"name": "第1武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第2武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第3武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第4武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "傭兵野営地", "count": 1, "prio": 9, "need": 0.75, "points": 10_080},
+            {"name": "中継所", "count": 0, "prio": 99, "skip": True, "points": 14_880},
+            # 採取：集結主になれなかった中で強い人。足りなければ近い施設の人の5軍・6軍
+            {"name": "採取・右上", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・右下", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・左上", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・左下", "count": 1, "prio": 50, "points": 28_750, "march": True},
         ],
     },
     "canyon": {
@@ -171,6 +172,113 @@ def assign(members, places, reserve_min, pos=None):
     return taken, skipped, pool
 
 
+MARCH_RATE = {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.7}  # 1軍=100%、2軍=90%、3軍=80%、4軍=70%
+
+
+def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
+    """集結主方式（兵器工場）。
+    1. 集結主になれるのは、トップの人の leader_min（2/3）以上の人だけ
+    2. 試験場（prio 1）：強い人の1軍から、第1・第2に均等（1→2→2→1）に集結主を入れる
+    3. その他の施設：prio の順に、必要な強さ（need × トップ）を満たす行軍の中で一番強いものを集結主にする。
+       まず1軍、いなければ2軍（90%）、3軍（80%）、4軍（70%）の順に探す。誰もいなければ今回は捨てる
+    4. 集結主にならなかった人：強い人から採取、一番弱い人たちが玉拾い（最低人数）
+    """
+    pool = sorted(members, key=lambda m: m["value"], reverse=True)
+    if not pool:
+        return [], [p for p in places if not p.get("march")], []
+    top = pool[0]["value"]
+    elig = [m for m in pool if m["value"] >= top * leader_min]
+    used = set()           # (人, 何軍目)
+    leaders = set()        # 集結主になった人
+    slots = {}
+    rally_places = [p for p in places if not p.get("march") and not p.get("skip")]
+    skipped = [p for p in places if p.get("skip")]
+
+    def take(m, k, place):
+        used.add((id(m), k))
+        leaders.add(id(m))
+        slots.setdefault(place["name"], []).append(dict(m, march_no=k, eff=round(m["value"] * MARCH_RATE[k])))
+
+    def next_free(m):
+        return next((k for k in MARCH_RATE if (id(m), k) not in used), None)
+
+    # 2. 試験場（いちばん小さい prio）
+    first = min((p["prio"] for p in rally_places), default=None)
+    labs = [p for p in rally_places if p["prio"] == first]
+    need_n = sum(p["count"] for p in labs)
+    order, fwd = [], True
+    while len(order) < need_n:
+        seq = labs if fwd else labs[::-1]
+        for p in seq:
+            if len(order) < need_n and sum(1 for x in order if x is p) < p["count"]:
+                order.append(p)
+        fwd = not fwd
+    cands = sorted(((m, k) for k in MARCH_RATE for m in elig), key=lambda g: (g[1], -g[0]["value"]))
+    for p in order:
+        g = next(((m, k) for m, k in cands if (id(m), k) not in used and next_free(m) == k), None)
+        if g:
+            take(g[0], g[1], p)
+    # 3. その他の施設
+    for p in sorted((p for p in rally_places if p["prio"] != first), key=lambda p: p["prio"]):
+        line = top * p.get("need", 0)
+        for _ in range(p["count"]):
+            g = None
+            for k in MARCH_RATE:
+                ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k and m["value"] * MARCH_RATE[k] >= line]
+                if ok:
+                    g = (max(ok, key=lambda m: m["value"]), k)
+                    break
+            if g:
+                take(g[0], g[1], p)
+        if p["name"] not in slots:
+            skipped.append(p)
+    # 4. 採取と玉拾い
+    others = [m for m in pool if id(m) not in leaders]
+    n_rest = min(reserve_min, len(others))
+    rest = others[len(others) - n_rest:] if n_rest else []
+    gatherers = others[:len(others) - n_rest]
+    gathers = [p for p in places if p.get("march")]
+    fwd, gi = True, 0
+    while gi < len(gatherers) and gathers:
+        for p in (gathers if fwd else gathers[::-1]):
+            if gi < len(gatherers):
+                slots.setdefault(p["name"], []).append(gatherers[gi])
+                gi += 1
+        fwd = not fwd
+    # 採取が空いたら、近い施設の集結主の5軍・6軍で埋める
+    homes = [(m, name) for name, ms in slots.items() for m in ms if m.get("march_no")]
+
+    def dist(a, b):
+        if not pos or a not in pos or b not in pos:
+            return 0
+        (x1, y1), (x2, y2) = pos[a], pos[b]
+        return (x1 - x2) ** 2 + (y1 - y2) ** 2
+
+    gave = set()
+    for p in gathers:
+        if not slots.get(p["name"]) and homes:
+            pool_h = [h for h in homes if h[0]["name"] not in gave] or homes
+            m, home = min(pool_h, key=lambda h: dist(p["name"], h[1]))
+            gave.add(m["name"])
+            base_m = {k: v for k, v in m.items() if k not in ("march_no", "eff")}
+            slots[p["name"]] = [dict(base_m, sub="5軍・6軍", home=home)]
+    order_names = [x["name"] for x in places]
+    taken = [(p, slots[p["name"]]) for p in places if p["name"] in slots]
+    taken.sort(key=lambda t: order_names.index(t[0]["name"]))
+    return taken, skipped, rest
+
+
+def plan(members, places, reserve_min, pos=None, mode=None, leader_min=2 / 3):
+    if mode == "rally":
+        return assign_rally(members, places, reserve_min, pos=pos, leader_min=leader_min)
+    return assign(members, places, reserve_min, pos=pos)
+
+
+def fallback_leaders(members, n=3):
+    """試験場が取れなかった時に、王室兵器工場へ集結をかける候補（上位3人）"""
+    return [m["name"] for m in sorted(members, key=lambda m: -m["value"])[:n]]
+
+
 def rallies(taken, targets, pos=None):
     """今回捨てる場所に、余裕があれば集結をかける人（強い人の2軍）を割り当てる。
     強い人 = 一番強い人を入れる場所（試験場など）のメンバー。その場所に近い人から、同じ人が重ならないように選ぶ"""
@@ -220,11 +328,13 @@ def fmt_value(v):
 
 
 def render_legion(event_name, legion, metric, members, places, reserve, target, pos=None, abandoned=(),
-                  attack=None, notes=(), time="", min_members=0):
-    taken, skipped, rest = assign(members, places, reserve_for(members, reserve, min_members), pos=pos)
+                  attack=None, notes=(), time="", min_members=0, mode=None, leader_min=2 / 3):
+    taken, skipped, rest = plan(members, places, reserve_for(members, reserve, min_members), pos=pos,
+                                mode=mode, leader_min=leader_min)
     got = sum(p.get("points", 0) for p, _ in taken)
     drop = [p["name"] for p in skipped] + list(abandoned)
-    rally = rallies(taken, drop, pos)
+    rally = {} if mode == "rally" else rallies(taken, drop, pos)
+    fb = fallback_leaders(members) if mode == "rally" and abandoned else []
     strikers = sorted(members, key=lambda m: -m["value"])[:attack["count"]] if attack and attack.get("count") else []
     show_points = any(p.get("points") for p in places)
     short = max(0, min_members - len(members))
@@ -236,6 +346,8 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
     if drop:
         h += 60 + 40 * len(drop)
+    if fb:
+        h += 100
     h += 70
     _d = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     note_lines = wrap(_d, attack.get("note", ""), f(21), W - 140) if strikers else []
@@ -271,7 +383,8 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         d.text((48, y + 10), p["name"], font=f(28, True), fill=TXT)
         nm_ = sum(1 for m in ms if not m.get("sub"))
         nk_ = len(ms) - nm_
-        right = (f"{nm_}人" if nm_ else "") + (f"{'＋' if nm_ else ''}行軍{nk_}" if nk_ else "") + (f"　{p['points']:,}P" if p.get("points") else "")
+        lead = any(m.get("march_no") for m in ms)
+        right = ((f"集結主{nm_}人" if lead else f"{nm_}人") if nm_ else "") + (f"{'＋' if nm_ else ''}行軍{nk_}" if nk_ else "") + (f"　{p['points']:,}P" if p.get("points") else "")
         d.text((W - 48, y + 12), right, font=f(24, True), fill=HEAD, anchor="ra")
         y += PH
         if p.get("note"):
@@ -285,7 +398,15 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
                 d.rectangle([24, y, W - 24, y + RH], fill=STRIPE)
             nm = clean(m["name"], d, f(26, True), 520)
             d.text((72, y + 7), nm, font=f(26, True), fill=TXT)
-            if m.get("sub"):
+            if m.get("march_no"):
+                k = m["march_no"]
+                sx = 72 + d.textlength(nm, font=f(26, True)) + 12
+                d.rounded_rectangle([sx, y + 9, sx + 64, y + 35], 7, fill="#7a4a00" if k > 1 else "#1d3557",
+                                    outline="#ffb020" if k > 1 else HEAD, width=1)
+                d.text((sx + 32, y + 22), f"{k}軍", font=f(17, True), fill="#ffd166" if k > 1 else HEAD, anchor="mm")
+                extra = f"（{int(MARCH_RATE[k] * 100)}%）" if k > 1 else ""
+                d.text((W - 48, y + 8), f"{fmt_value(m['eff'])}{extra}", font=f(24), fill=GOLD, anchor="ra")
+            elif m.get("sub"):
                 sx = 72 + d.textlength(nm, font=f(26, True)) + 12
                 d.rounded_rectangle([sx, y + 9, sx + 110, y + 35], 7, fill="#2c3e5a")
                 d.text((sx + 55, y + 22), m["sub"], font=f(17, True), fill="#7ee2b8", anchor="mm")
@@ -300,13 +421,19 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         y += 16
 
     if drop:
-        d.text((48, y + 10), "今回は捨てる施設 → 余裕があれば強い人の2軍で集結", font=f(24, True), fill=SUB)
+        d.text((48, y + 10), "今回は捨てる施設" if mode == "rally" else "今回は捨てる施設 → 余裕があれば強い人の2軍で集結",
+               font=f(24, True), fill=SUB)
         y += 52
         for i, name in enumerate(drop):
             d.text((48, y + i * 40), f"・{name}", font=f(22), fill=DIM)
             if name in rally:
                 d.text((W - 48, y + i * 40), f"集結：{rally[name]}（2軍）", font=f(22, True), fill="#ffb020", anchor="ra")
         y += 40 * len(drop) + 8
+    if fb:
+        d.rounded_rectangle([24, y, W - 24, y + 84], 10, outline="#ffb020", width=2)
+        d.text((48, y + 10), f"試験場が取れなかった時 → {abandoned[0]}に集結", font=f(24, True), fill="#ffb020")
+        d.text((48, y + 46), "集結主：" + "／".join(fb) + "（上位3人の中から）", font=f(22, True), fill=TXT)
+        y += 100
 
     if strikers:
         d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#5a1e2a")
@@ -371,13 +498,15 @@ MAPS = {"foundry": {"pos": FOUNDRY_MAP, "center": "王室兵器工場"}}
 CARD_W = 236
 
 
-def render_map(ev, event_name, legion, metric, members, places, reserve, min_members=0):
+def render_map(ev, event_name, legion, metric, members, places, reserve, min_members=0, mode=None, leader_min=2 / 3):
     pos = MAPS[ev]["pos"]
-    taken, skipped, rest = assign(members, places, reserve_for(members, reserve, min_members), pos=pos)
+    taken, skipped, rest = plan(members, places, reserve_for(members, reserve, min_members), pos=pos,
+                                mode=mode, leader_min=leader_min)
     tk = {p["name"]: ms for p, ms in taken}
     sk = {p["name"] for p in skipped}
     center = MAPS[ev]["center"]
-    rally = rallies(taken, [p["name"] for p in skipped] + [center], pos)
+    rally = {} if mode == "rally" else rallies(taken, [p["name"] for p in skipped] + [center], pos)
+    fb = fallback_leaders(members) if mode == "rally" else []
     H = 1580 + 46 * ((len(rest) + 2) // 3)
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
@@ -390,12 +519,16 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
         d.polygon([(cx, 740), (cx + 44, 784), (cx, 828), (cx - 44, 784)], outline=col, width=4)
         d.text((cx, 850), lab, font=f(20, True), fill=col, anchor="ma")
     # 中央
-    d.ellipse([415, 640, 665, 890], outline="#4b5d75", width=3, fill="#1f2b40")
+    d.ellipse([400, 625, 680, 905], outline="#4b5d75", width=3, fill="#1f2b40")
     d.text((540, 730), MAPS[ev]["center"], font=f(22, True), fill=DIM, anchor="mm")
     d.text((540, 764), "今回は捨てる", font=f(18), fill=DIM, anchor="mm")
     if center in rally:
         d.text((540, 806), "余裕があれば集結", font=f(16), fill="#ffb020", anchor="mm")
         d.text((540, 830), clean(rally[center], d, f(18, True), 170) + "（2軍）", font=f(18, True), fill="#ffb020", anchor="mm")
+    if fb:
+        d.text((540, 796), "試験場が取れなかった時", font=f(16, True), fill="#ffb020", anchor="mm")
+        for i, nm in enumerate(fb):
+            d.text((540, 822 + 22 * i), clean(nm, d, f(17, True), 200), font=f(17, True), fill="#ffb020", anchor="mm")
 
     for name, (cx, cy) in pos.items():
         if name in tk:
@@ -424,7 +557,11 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
             continue
         for i, m in enumerate(lines):
             yy = y0 + 46 + 32 * i + 16
-            if m.get("sub"):
+            if m.get("march_no"):
+                k = m["march_no"]
+                label = "★" + clean(m["name"], d, f(20, True), CARD_W - 90) + (f"（{k}軍）" if k > 1 else "")
+                d.text((cx, yy), label, font=f(20, True), fill="#ffd166" if k > 1 else TXT, anchor="mm")
+            elif m.get("sub"):
                 label = clean(m["name"], d, f(20, True), CARD_W - 100) + "（5・6軍）"
                 d.text((cx, yy), label, font=f(19, True), fill="#7ee2b8", anchor="mm")
             else:

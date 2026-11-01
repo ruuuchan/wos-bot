@@ -198,11 +198,13 @@ def setup(tree: app_commands.CommandTree, admin):
                     img = B.render_legion(B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"], c["target"], pos=pos,
                                           abandoned=c.get("abandoned", []), attack=c.get("attack"),
                                           notes=c.get("notes", []), time=c.get("times", {}).get(lg, ""),
-                                          min_members=c.get("min_members", 0))
+                                          min_members=c.get("min_members", 0), mode=c.get("mode"),
+                                          leader_min=c.get("leader_min", 2 / 3))
                     files.append(discord.File(img, f"{ev}_legion{i}_list.png"))
                     if ev in B.MAPS:
                         files.append(discord.File(B.render_map(ev, B.EVENTS[ev], lg, c["metric"], ms, c["places"], c["reserve"],
-                                                               c.get("min_members", 0)),
+                                                               c.get("min_members", 0), mode=c.get("mode"),
+                                                               leader_min=c.get("leader_min", 2 / 3)),
                                                   f"{ev}_legion{i}_map.png"))
             return files
 
@@ -216,14 +218,15 @@ def setup(tree: app_commands.CommandTree, admin):
                            優先="取りに行く順。小さいほど先に取りに行き、人が足りないと大きい数字から空ける",
                            強さ順="強い人を入れる順。小さいほど強い人（省略すると優先と同じ。同じ数字は交互に入れる）",
                            ポイント="占領ポイント（省略可）", メモ="画像に出す一言（例：＋5軍・6軍も採取へ）",
-                           均等="はい＝人数を決めず、来た人を同じ優先の場所へ均等に分ける（峡谷の方面など）")
+                           均等="はい＝人数を決めず、来た人を同じ優先の場所へ均等に分ける（峡谷の方面など）",
+                           必要="兵器工場：集結主に必要な強さ（トップの人を100とした%。例：75）")
     @app_commands.guild_only()
     @admin
     async def cmd_place_add(interaction: discord.Interaction, イベント: app_commands.Choice[str], 名前: str,
                             人数: app_commands.Range[int, 0, 30], 優先: app_commands.Range[int, 1, 99],
                             強さ順: app_commands.Range[int, 1, 99] | None = None,
                             ポイント: app_commands.Range[int, 0, 10_000_000] | None = None, メモ: str | None = None,
-                            均等: bool | None = None):
+                            均等: bool | None = None, 必要: app_commands.Range[int, 0, 100] | None = None):
         ev, gid = イベント.value, interaction.guild_id
         c = cfg(gid, ev)
         name = 名前.strip()
@@ -240,6 +243,11 @@ def setup(tree: app_commands.CommandTree, admin):
                 new[k] = old[k]
         if (均等 if 均等 is not None else old.get("fill")):
             new["fill"] = True
+        need = (必要 / 100) if 必要 is not None else old.get("need")
+        if need is not None:
+            new["need"] = need
+        if old.get("skip"):
+            new["skip"] = True
         if idx is None:
             c["places"].append(new)
             msg = "追加しました"
@@ -376,7 +384,14 @@ def places_text(c):
         lines.append(f"注意書き：{n}")
     for p in sorted(c["places"], key=lambda p: p["prio"]):
         pt = f"　{p['points']:,}P" if p.get("points") else ""
-        cnt = "均等" if p.get("fill") else f"{p['count']}人"
+        if p.get("skip"):
+            cnt = "捨てる"
+        elif p.get("fill"):
+            cnt = "均等"
+        elif c.get("mode") == "rally" and not p.get("march"):
+            cnt = f"集結主{p['count']}人・必要{int(p.get('need', 0) * 100)}%"
+        else:
+            cnt = f"{p['count']}人"
         lines.append(f"優先{p['prio']}・強さ順{p.get('strength', p['prio'])}　{p['name']}　{cnt}{pt}")
     if not c["places"]:
         lines.append("（場所がまだありません。/場所追加 で登録してください）")
