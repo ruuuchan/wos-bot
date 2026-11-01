@@ -38,12 +38,12 @@ DEFAULTS = {
             {"name": "第1武器試験場", "side": "L", "count": 2, "prio": 1, "need": 0, "points": 74_400},
             {"name": "第2武器試験場", "side": "R", "count": 2, "prio": 1, "need": 0, "points": 74_400},
             {"name": "スチームボイラー", "side": "L", "count": 1, "prio": 2, "need": 0.75, "points": 14_880},
-            {"name": "兵器倉庫", "side": "L", "count": 1, "prio": 3, "need": 0.75, "points": 10_080},
-            {"name": "第1武器修理工場", "side": "L", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第2武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第3武器修理工場", "side": "L", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第4武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "傭兵野営地", "side": "R", "count": 1, "prio": 9, "spare_only": True, "points": 10_080},
+            {"name": "兵器倉庫", "side": "L", "count": 1, "prio": 4, "need": 0.6, "leader_min": 0.6, "points": 10_080},
+            {"name": "第1武器修理工場", "side": "L", "count": 1, "prio": 3, "need": 0.75, "points": 37_200},
+            {"name": "第2武器修理工場", "side": "R", "count": 1, "prio": 3, "need": 0.75, "points": 37_200},
+            {"name": "第3武器修理工場", "side": "L", "count": 1, "prio": 3, "need": 0.75, "points": 37_200},
+            {"name": "第4武器修理工場", "side": "R", "count": 1, "prio": 3, "need": 0.75, "points": 37_200},
+            {"name": "傭兵野営地", "side": "R", "count": 1, "prio": 9, "spare_only": True, "leader_min": 0.6, "points": 10_080},
             {"name": "中継所", "side": "R", "count": 1, "prio": 9, "spare_only": True, "points": 14_880},
             # 採取：集結主になれなかった中で強い人。足りなければ近い施設の人の5軍・6軍
             {"name": "採取・右上", "side": "R", "count": 1, "prio": 50, "points": 28_750, "march": True},
@@ -253,10 +253,11 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     # 3. その他の施設
     for p in sorted((p for p in rally_places if p["prio"] != first), key=lambda p: p["prio"]):
         line = top * p.get("need", 0)
+        elig_p = [m for m in pool if m["value"] >= top * min(leader_min, p.get("leader_min", leader_min))]
         for _ in range(p["count"]):
             g = None
             for k in MARCH_RATE:
-                ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k
+                ok = [m for m in elig_p if (id(m), k) not in used and next_free(m) == k
                       and m["value"] * MARCH_RATE[k] >= line and not here(m, p) and (k == 1 or same_side(m, p))]
                 if ok:
                     # 1軍は強い人から。2軍以降は、その人がいる施設から近い人を優先（同じくらいなら強い人）
@@ -277,7 +278,7 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     riders = mid[len(gathers):]
     for p in sorted(spare_places, key=lambda p: p["prio"]):
         for _ in range(p["count"]):
-            g = next((m for m in riders if m["value"] >= top * leader_min), None)
+            g = next((m for m in riders if m["value"] >= top * min(leader_min, p.get("leader_min", leader_min))), None)
             if g:
                 riders.remove(g)
                 take(g, 1, p)
