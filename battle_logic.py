@@ -43,8 +43,8 @@ DEFAULTS = {
             {"name": "第2武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
             {"name": "第3武器修理工場", "side": "L", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
             {"name": "第4武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "傭兵野営地", "side": "R", "count": 1, "prio": 9, "need": 0.75, "points": 10_080},
-            {"name": "中継所", "side": "R", "count": 0, "prio": 99, "skip": True, "points": 14_880},
+            {"name": "傭兵野営地", "side": "R", "count": 1, "prio": 9, "spare_only": True, "points": 10_080},
+            {"name": "中継所", "side": "R", "count": 1, "prio": 9, "spare_only": True, "points": 14_880},
             # 採取：集結主になれなかった中で強い人。足りなければ近い施設の人の5軍・6軍
             {"name": "採取・右上", "side": "R", "count": 1, "prio": 50, "points": 28_750, "march": True},
             {"name": "採取・右下", "side": "R", "count": 1, "prio": 50, "points": 28_750, "march": True},
@@ -195,7 +195,9 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     used = set()           # (人, 何軍目)
     leaders = set()        # 集結主になった人
     slots = {}
-    rally_places = [p for p in places if not p.get("march") and not p.get("skip")]
+    # spare_only：余っている人（採取にも入らず乗り手になる人）の中に集結主になれる人がいれば入れる
+    rally_places = [p for p in places if not p.get("march") and not p.get("skip") and not p.get("spare_only")]
+    spare_places = [p for p in places if p.get("spare_only")]
     skipped = [p for p in places if p.get("skip")]
 
     def take(m, k, place):
@@ -273,6 +275,14 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     for p, m in zip(gathers, mid):  # 採取は各1人
         slots.setdefault(p["name"], []).append(m)
     riders = mid[len(gathers):]
+    for p in sorted(spare_places, key=lambda p: p["prio"]):
+        for _ in range(p["count"]):
+            g = next((m for m in riders if m["value"] >= top * leader_min), None)
+            if g:
+                riders.remove(g)
+                take(g, 1, p)
+        if p["name"] not in slots:
+            skipped.append(p)
     lab_names = [p["name"] for p in labs if p["name"] in slots]
     for i, m in enumerate(riders):  # 乗り手は試験場1→2→2→1…に駐屯
         if not lab_names:
