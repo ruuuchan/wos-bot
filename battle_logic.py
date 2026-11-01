@@ -220,9 +220,25 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     def here(m, place):  # 同じ施設に同じ人の行軍は2つ出せない
         return any(x.get("name") == m["name"] for x in slots.get(place["name"], []))
 
+    def homes_of(m):  # その人がすでに集結主になっている施設
+        return [n for n, xs in slots.items() for x in xs if x.get("march_no") and x["name"] == m["name"]]
+
+    def d2(a, b):
+        if not pos or a not in pos or b not in pos:
+            return 0
+        (x1, y1), (x2, y2) = pos[a], pos[b]
+        return (x1 - x2) ** 2 + (y1 - y2) ** 2
+
+    def near(m, place):  # 2軍以降は、その人の今いる施設から近い順
+        hs = homes_of(m)
+        return min((d2(h, place["name"]) for h in hs), default=0)
+
+    lab_names_all = {p["name"] for p in labs}
     for p in order:
+        # 試験場同士は遠いので、もう片方の試験場にいる人の2軍は使わない
         g = next(((m, k) for m, k in cands
-                  if (id(m), k) not in used and next_free(m) == k and not here(m, p)), None)
+                  if (id(m), k) not in used and next_free(m) == k and not here(m, p)
+                  and not (set(homes_of(m)) & (lab_names_all - {p["name"]}))), None)
         if g:
             take(g[0], g[1], p)
     # 3. その他の施設
@@ -234,7 +250,8 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
                 ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k
                       and m["value"] * MARCH_RATE[k] >= line and not here(m, p)]
                 if ok:
-                    g = (max(ok, key=lambda m: m["value"]), k)
+                    # 1軍は強い人から。2軍以降は、その人がいる施設から近い人を優先（同じくらいなら強い人）
+                    g = (min(ok, key=lambda m: (near(m, p) if k > 1 else 0, -m["value"])), k)
                     break
             if g:
                 take(g[0], g[1], p)
