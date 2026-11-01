@@ -181,7 +181,10 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     2. 試験場（prio 1）：強い人の1軍から、第1・第2に均等（1→2→2→1）に集結主を入れる
     3. その他の施設：prio の順に、必要な強さ（need × トップ）を満たす行軍の中で一番強いものを集結主にする。
        まず1軍、いなければ2軍（90%）、3軍（80%）、4軍（70%）の順に探す。誰もいなければ今回は捨てる
-    4. 集結主にならなかった人：強い人から採取、一番弱い人たちが玉拾い（最低人数）
+    4. 集結主にならなかった人：
+       ・強い人から採取（各場所1人ずつ）
+       ・一番弱い人たちが玉拾い（最低人数）
+       ・残りは「乗り手」：試験場に駐屯して、各施設の集結に乗る（試験場1・2に均等）
     """
     pool = sorted(members, key=lambda m: m["value"], reverse=True)
     if not pool:
@@ -236,17 +239,20 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     others = [m for m in pool if id(m) not in leaders]
     n_rest = min(reserve_min, len(others))
     rest = others[len(others) - n_rest:] if n_rest else []
-    gatherers = others[:len(others) - n_rest]
+    mid = others[:len(others) - n_rest]
     gathers = [p for p in places if p.get("march")]
-    fwd, gi = True, 0
-    while gi < len(gatherers) and gathers:
-        for p in (gathers if fwd else gathers[::-1]):
-            if gi < len(gatherers):
-                slots.setdefault(p["name"], []).append(gatherers[gi])
-                gi += 1
-        fwd = not fwd
+    for p, m in zip(gathers, mid):  # 採取は各1人
+        slots.setdefault(p["name"], []).append(m)
+    riders = mid[len(gathers):]
+    lab_names = [p["name"] for p in labs if p["name"] in slots]
+    for i, m in enumerate(riders):  # 乗り手は試験場1→2→2→1…に駐屯
+        if not lab_names:
+            break
+        r, q = divmod(i, len(lab_names))
+        name = lab_names[q] if r % 2 == 0 else lab_names[::-1][q]
+        slots[name].append(dict(m, rider=True))
     # 採取が空いたら、近い施設の集結主の5軍・6軍で埋める
-    homes = [(m, name) for name, ms in slots.items() for m in ms if m.get("march_no")]
+    homes = [(m, name) for name, ms in slots.items() for m in ms if m.get("march_no") or m.get("rider")]
 
     def dist(a, b):
         if not pos or a not in pos or b not in pos:
@@ -384,7 +390,9 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         nm_ = sum(1 for m in ms if not m.get("sub"))
         nk_ = len(ms) - nm_
         lead = any(m.get("march_no") for m in ms)
-        right = ((f"集結主{nm_}人" if lead else f"{nm_}人") if nm_ else "") + (f"{'＋' if nm_ else ''}行軍{nk_}" if nk_ else "") + (f"　{p['points']:,}P" if p.get("points") else "")
+        nr_ = sum(1 for m in ms if m.get("rider"))
+        nm_ -= nr_
+        right = ((f"集結主{nm_}人" if lead else f"{nm_}人") if nm_ else "") + (f"＋乗り手{nr_}人" if nr_ else "") + (f"{'＋' if nm_ else ''}行軍{nk_}" if nk_ else "") + (f"　{p['points']:,}P" if p.get("points") else "")
         d.text((W - 48, y + 12), right, font=f(24, True), fill=HEAD, anchor="ra")
         y += PH
         if p.get("note"):
@@ -406,6 +414,11 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
                 d.text((sx + 32, y + 22), f"{k}軍", font=f(17, True), fill="#ffd166" if k > 1 else HEAD, anchor="mm")
                 extra = f"（{int(MARCH_RATE[k] * 100)}%）" if k > 1 else ""
                 d.text((W - 48, y + 8), f"{fmt_value(m['eff'])}{extra}", font=f(24), fill=GOLD, anchor="ra")
+            elif m.get("rider"):
+                sx = 72 + d.textlength(nm, font=f(26, True)) + 12
+                d.rounded_rectangle([sx, y + 9, sx + 76, y + 35], 7, fill="#2c3e5a")
+                d.text((sx + 38, y + 22), "乗り手", font=f(17, True), fill="#9fb3cc", anchor="mm")
+                d.text((W - 48, y + 8), fmt_value(m["value"]), font=f(24), fill=SUB, anchor="ra")
             elif m.get("sub"):
                 sx = 72 + d.textlength(nm, font=f(26, True)) + 12
                 d.rounded_rectangle([sx, y + 9, sx + 110, y + 35], 7, fill="#2c3e5a")
@@ -532,7 +545,10 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
 
     for name, (cx, cy) in pos.items():
         if name in tk:
-            ms = tk[name]
+            ms = [m for m in tk[name] if not m.get("rider")]
+            nride = len(tk[name]) - len(ms)
+            if nride:
+                ms = ms + [{"name": f"＋乗り手 {nride}人", "value": 0, "rider_line": True}]
             gather = name.startswith("採取")
             head = "#134e3a" if gather else "#1d3557"
             edge = "#1dd1a1" if gather else "#54a0ff"
@@ -557,6 +573,9 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
             continue
         for i, m in enumerate(lines):
             yy = y0 + 46 + 32 * i + 16
+            if m.get("rider_line"):
+                d.text((cx, yy), m["name"], font=f(18, True), fill=SUB, anchor="mm")
+                continue
             if m.get("march_no"):
                 k = m["march_no"]
                 label = "★" + clean(m["name"], d, f(20, True), CARD_W - 90) + (f"（{k}軍）" if k > 1 else "")
