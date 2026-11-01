@@ -338,6 +338,9 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
     taken, skipped, rest = plan(members, places, reserve_for(members, reserve, min_members), pos=pos,
                                 mode=mode, leader_min=leader_min)
     got = sum(p.get("points", 0) for p, _ in taken)
+    # 2軍・3軍が集結主の施設は「余裕があれば」
+    spare = {p["name"] for p, ms in taken if any((m.get("march_no") or 1) > 1 for m in ms)}
+    got_main = sum(p.get("points", 0) for p, _ in taken if p["name"] not in spare)
     drop = [p["name"] for p in skipped] + list(abandoned)
     rally = {} if mode == "rally" else rallies(taken, drop, pos)
     fb = fallback_leaders(members) if mode == "rally" and abandoned else []
@@ -347,7 +350,7 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
 
     # 高さを先に計算
     RH, PH = 44, 58
-    h = 200 + (70 if show_points else 0) + (70 if short else 0)
+    h = 200 + (106 if show_points else 0) + (70 if short else 0)
     for p, ms in taken:
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
     if drop:
@@ -375,18 +378,21 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
                font=f(24, True), fill="#ff9fb0")
         y += 70
     if show_points:
-        ok = target and got >= target
+        ok = target and got_main >= target
         col = "#1dd1a1" if ok else ("#ffb020" if target else TXT)
-        d.rounded_rectangle([24, y, W - 24, y + 56], 10, outline=col, width=2)
+        bh = 92 if spare else 56
+        d.rounded_rectangle([24, y, W - 24, y + bh], 10, outline=col, width=2)
         d.text((48, y + 12), "取りに行く施設の合計", font=f(24, True), fill=SUB)
         tgt = f"　／　目標 {target:,}P" if target else ""
-        d.text((W - 48, y + 10), f"{got:,}P{tgt}", font=f(28, True), fill=col, anchor="ra")
-        y += 80
+        d.text((W - 48, y + 10), f"{got_main:,}P{tgt}", font=f(28, True), fill=col, anchor="ra")
+        if spare:
+            d.text((W - 48, y + 52), f"余裕があれば（2・3軍の集結）込みで {got:,}P", font=f(21, True), fill="#ffd166", anchor="ra")
+        y += bh + 24
     y += 10
 
     for p, ms in taken:
-        d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#1d3557")
-        d.text((48, y + 10), p["name"], font=f(28, True), fill=TXT)
+        d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#4a3300" if p["name"] in spare else "#1d3557")
+        d.text((48, y + 10), p["name"] + ("（余裕があれば）" if p["name"] in spare else ""), font=f(28, True), fill=TXT)
         nm_ = sum(1 for m in ms if not m.get("sub"))
         nk_ = len(ms) - nm_
         lead = any(m.get("march_no") for m in ms)
@@ -496,10 +502,10 @@ FOUNDRY_MAP = {
     "傭兵野営地": (520, 415),
     "採取・左上": (250, 440),
     "採取・右上": (800, 440),
-    "第1武器試験場": (250, 600),
+    "第1武器試験場": (250, 625),
     "第2武器修理工場": (840, 640),
     "第1武器修理工場": (260, 840),
-    "第2武器試験場": (790, 880),
+    "第2武器試験場": (812, 890),
     "採取・左下": (330, 1060),
     "採取・右下": (850, 1110),
     "兵器倉庫": (560, 1170),
@@ -545,20 +551,27 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
 
     for name, (cx, cy) in pos.items():
         if name in tk:
-            ms = [m for m in tk[name] if not m.get("rider")]
-            nride = len(tk[name]) - len(ms)
-            if nride:
-                ms = ms + [{"name": f"＋乗り手 {nride}人", "value": 0, "rider_line": True}]
+            ms = tk[name]
             gather = name.startswith("採取")
-            head = "#134e3a" if gather else "#1d3557"
-            edge = "#1dd1a1" if gather else "#54a0ff"
-            lines = ms
+            spare_here = any((m.get("march_no") or 1) > 1 for m in ms)
+            head = "#134e3a" if gather else ("#4a3300" if spare_here else "#1d3557")
+            edge = "#1dd1a1" if gather else ("#ffb020" if spare_here else "#54a0ff")
+            lines = []  # (高さ, 描く関数用データ)
+            if spare_here:
+                lines.append((26, ("spare", None)))
+            for m in ms:
+                if not m.get("rider"):
+                    lines.append((32, ("m", m)))
+            riders = [m for m in ms if m.get("rider")]
+            if riders:
+                lines.append((26, ("rhead", len(riders))))
+                for k in range(0, len(riders), 2):
+                    lines.append((26, ("rpair", riders[k:k + 2])))
         elif name in sk:
             head, edge, lines = "#1f2b40", "#4b5d75", None
         else:
             continue
-        n = len(lines) if lines else (3 if name in rally else 1)
-        h = 46 + 32 * n + 10
+        h = 46 + (sum(a for a, _ in lines) if lines else (3 if name in rally else 1) * 32) + 10
         x0, y0 = cx - CARD_W // 2, cy - h // 2
         d.rounded_rectangle([x0, y0, x0 + CARD_W, y0 + h], 12, fill="#101a2b", outline=edge, width=3)
         d.rounded_rectangle([x0, y0, x0 + CARD_W, y0 + 44], 12, fill=head)
@@ -571,20 +584,26 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
                 d.text((cx, y0 + 46 + 80), clean(rally[name], d, f(19, True), CARD_W - 80) + "（2軍）",
                        font=f(19, True), fill="#ffb020", anchor="mm")
             continue
-        for i, m in enumerate(lines):
-            yy = y0 + 46 + 32 * i + 16
-            if m.get("rider_line"):
-                d.text((cx, yy), m["name"], font=f(18, True), fill=SUB, anchor="mm")
-                continue
-            if m.get("march_no"):
+        yy = y0 + 46
+        for lh, (kind, m) in lines:
+            c = yy + lh // 2
+            if kind == "spare":
+                d.text((cx, c), "余裕があれば", font=f(17, True), fill="#ffb020", anchor="mm")
+            elif kind == "rhead":
+                d.text((cx, c), f"乗り手 {m}人", font=f(16, True), fill=SUB, anchor="mm")
+            elif kind == "rpair":
+                txt = "　".join(clean(r["name"], d, f(17), (CARD_W - 30) // 2) for r in m)
+                d.text((cx, c), txt, font=f(17), fill="#c9d6e8", anchor="mm")
+            elif m.get("march_no"):
                 k = m["march_no"]
                 label = "★" + clean(m["name"], d, f(20, True), CARD_W - 90) + (f"（{k}軍）" if k > 1 else "")
-                d.text((cx, yy), label, font=f(20, True), fill="#ffd166" if k > 1 else TXT, anchor="mm")
+                d.text((cx, c), label, font=f(20, True), fill="#ffd166" if k > 1 else TXT, anchor="mm")
             elif m.get("sub"):
                 label = clean(m["name"], d, f(20, True), CARD_W - 100) + "（5・6軍）"
-                d.text((cx, yy), label, font=f(19, True), fill="#7ee2b8", anchor="mm")
+                d.text((cx, c), label, font=f(19, True), fill="#7ee2b8", anchor="mm")
             else:
-                d.text((cx, yy), clean(m["name"], d, f(21, True), CARD_W - 20), font=f(21, True), fill=TXT, anchor="mm")
+                d.text((cx, c), clean(m["name"], d, f(21, True), CARD_W - 20), font=f(21, True), fill=TXT, anchor="mm")
+            yy += lh
 
     # 地図にない場所（あとから追加した場所など）
     extra = [(p, ms) for p, ms in taken if p["name"] not in pos]
