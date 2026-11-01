@@ -315,7 +315,7 @@ def setup(tree: app_commands.CommandTree, admin):
         db.clear_entries(interaction.guild_id, イベント.value)
         await interaction.response.send_message(f"🗑️ {B.EVENTS[イベント.value]} の登録を全部消しました", ephemeral=True)
 
-    @tree.command(name="代理登録", description="【運営】Discordにいない人を代わりに登録（同じ名前なら上書き）")
+    @tree.command(name="振り分け_代理登録", description="【運営】Discordにいない人を代わりに登録（同じ名前なら上書き）")
     @app_commands.choices(イベント=EVENT_CHOICES, 時間=LEGION_CHOICES)
     @app_commands.describe(名前="ゲーム内の名前", 数値="部隊戦力・総力など（名前の横の数値）")
     @app_commands.guild_only()
@@ -330,7 +330,7 @@ def setup(tree: app_commands.CommandTree, admin):
                       {"name": name, "legion": 時間.value, "value": v, "proxy": True})
         await interaction.response.send_message(f"✅ {name}（{時間.value}／{v:,}）を代理登録しました", ephemeral=True)
 
-    @tree.command(name="まとめて代理登録", description="【運営】Discordにいない人を、名前と数値の一覧を貼り付けてまとめて登録")
+    @tree.command(name="振り分け_まとめて代理登録", description="【運営】Discordにいない人を、名前と数値の一覧を貼り付けてまとめて登録")
     @app_commands.choices(イベント=EVENT_CHOICES, 時間=LEGION_CHOICES)
     @app_commands.guild_only()
     @admin
@@ -342,7 +342,7 @@ def setup(tree: app_commands.CommandTree, admin):
         names = [e["name"] for e in db.all_entries(interaction.guild_id, ev) if e.get("proxy")]
         return [app_commands.Choice(name=n, value=n) for n in names if current in n][:25]
 
-    @tree.command(name="代理削除", description="【運営】代理登録した人を取り消す")
+    @tree.command(name="振り分け_代理取消", description="【運営】代理登録した人を取り消す")
     @app_commands.choices(イベント=EVENT_CHOICES)
     @app_commands.autocomplete(名前=entry_autocomplete)
     @app_commands.guild_only()

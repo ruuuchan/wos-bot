@@ -235,7 +235,7 @@ class NumModal(discord.ui.Modal):
         if proxy:  # 運営による代理申請（Discordにいない人）
             uid = battle_bot.proxy_id(proxy)
             self.draft.update(fc=fc, sp_hours=sp, name=proxy, user_id=uid, proxy=True)
-            head = f"✅ {proxy} さんの分を代理で受け付けました（/代理申請 で同じ名前を入れれば直せます）"
+            head = f"✅ {proxy} さんの分を代理で受け付けました（/準備_代理入力 で同じ名前を入れれば直せます）"
         else:
             uid = interaction.user.id
             self.draft.update(fc=fc, sp_hours=sp, name=interaction.user.display_name, user_id=uid)
@@ -468,7 +468,7 @@ async def cmd_mine(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-@tree.command(name="代理申請", description="【運営】Discordにいない人の申請を代わりに入力（同じ名前なら上書き）")
+@tree.command(name="準備_代理入力", description="【運営】Discordにいない人の申請を代わりに入力（同じ名前なら上書き）")
 @app_commands.describe(名前="ゲーム内の名前")
 @app_commands.guild_only()
 @admin
@@ -481,7 +481,7 @@ async def proxy_answer_autocomplete(interaction: discord.Interaction, current: s
     return [app_commands.Choice(name=n, value=n) for n in names if current in n][:25]
 
 
-@tree.command(name="代理申請削除", description="【運営】代理で入力した申請を取り消す")
+@tree.command(name="準備_代理取消", description="【運営】代理で入力した申請を取り消す")
 @app_commands.autocomplete(名前=proxy_answer_autocomplete)
 @app_commands.guild_only()
 @admin
