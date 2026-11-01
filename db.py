@@ -28,6 +28,11 @@ def get_answer(guild_id: int, user_id: int):
     return json.loads(row[0]) if row else None
 
 
+def delete_answer(guild_id: int, user_id: int):
+    _conn.execute("DELETE FROM answers WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+    _conn.commit()
+
+
 def all_answers(guild_id: int):
     rows = _conn.execute("SELECT data FROM answers WHERE guild_id=?", (guild_id,)).fetchall()
     return [json.loads(r[0]) for r in rows]

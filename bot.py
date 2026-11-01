@@ -176,7 +176,7 @@ class Step1(discord.ui.View):
         missing = [n for k, n in [("ally", "所属同盟"), ("join", "参加可能時間"), ("hours", "希望時間帯")] if not self.draft.get(k)]
         if missing:
             return await interaction.response.send_message(f"「{'・'.join(missing)}」を選んでください", ephemeral=True)
-        await interaction.response.edit_message(content=STEP2_TEXT, view=Step2(self.draft, self.gid))
+        await interaction.response.edit_message(content=proxy_head(self.draft) + STEP2_TEXT, view=Step2(self.draft, self.gid))
 
 
 class Step2(discord.ui.View):
@@ -195,7 +195,7 @@ class Step2(discord.ui.View):
 
     @discord.ui.button(label="戻る", style=discord.ButtonStyle.secondary, row=4)
     async def back(self, interaction: discord.Interaction, _):
-        await interaction.response.edit_message(content=STEP1_TEXT, view=Step1(self.draft, self.gid))
+        await interaction.response.edit_message(content=proxy_head(self.draft) + STEP1_TEXT, view=Step1(self.draft, self.gid))
 
     @discord.ui.button(label="次へ：火晶・加速を入力", style=discord.ButtonStyle.primary, row=4)
     async def next(self, interaction: discord.Interaction, _):
@@ -231,11 +231,21 @@ class NumModal(discord.ui.Modal):
                 f"数字が大きすぎます（火晶 {fc:,}／加速 {render.sp_label(sp)}）。打ち間違いがないか確認して、もう一度「次へ」から入れ直してください\n"
                 f"上限：火晶 {config.MAX_FC:,}、加速 {config.MAX_SP_DAYS:,}日",
                 ephemeral=True)
-        self.draft.update(fc=fc, sp_hours=sp, name=interaction.user.display_name, user_id=interaction.user.id)
-        db.save_answer(self.gid, interaction.user.id, self.draft)
-        await interaction.response.send_message(
-            f"✅ 受け付けました。変更するときはもう一度申請すれば上書きされます。\n\n{summary_text(self.draft)}",
-            ephemeral=True)
+        proxy = self.draft.pop("_proxy", None)
+        if proxy:  # 運営による代理申請（Discordにいない人）
+            uid = battle_bot.proxy_id(proxy)
+            self.draft.update(fc=fc, sp_hours=sp, name=proxy, user_id=uid, proxy=True)
+            head = f"✅ {proxy} さんの分を代理で受け付けました（/代理申請 で同じ名前を入れれば直せます）"
+        else:
+            uid = interaction.user.id
+            self.draft.update(fc=fc, sp_hours=sp, name=interaction.user.display_name, user_id=uid)
+            head = "✅ 受け付けました。変更するときはもう一度申請すれば上書きされます。"
+        db.save_answer(self.gid, uid, self.draft)
+        await interaction.response.send_message(f"{head}\n\n{summary_text(self.draft)}", ephemeral=True)
+
+
+def proxy_head(draft):
+    return f"📝 **{draft['_proxy']}** さんの分を代理で入力中\n" if draft.get("_proxy") else ""
 
 
 async def closed(interaction: discord.Interaction):
@@ -250,15 +260,20 @@ async def closed(interaction: discord.Interaction):
     return True
 
 
-async def start_apply(interaction: discord.Interaction):
+async def start_apply(interaction: discord.Interaction, proxy: str | None = None):
     if await closed(interaction):
         return
     gid = interaction.guild_id
     start, _ = event(gid)
-    draft = db.get_answer(gid, interaction.user.id) or {}
+    uid = battle_bot.proxy_id(proxy) if proxy else interaction.user.id
+    draft = db.get_answer(gid, uid) or {}
     valid = {v for _, v in slot_options(start)}
     draft["hours"] = [h for h in draft.get("hours", []) if h in valid]  # 期間が変わっていたら希望時間はリセット
-    await interaction.response.send_message(STEP1_TEXT, view=Step1(draft, gid), ephemeral=True)
+    head = ""
+    if proxy:
+        draft["_proxy"] = proxy
+        head = f"📝 **{proxy}** さんの分を代理で入力します\n"
+    await interaction.response.send_message(head + STEP1_TEXT, view=Step1(draft, gid), ephemeral=True)
 
 
 class Panel(discord.ui.View):
@@ -451,6 +466,39 @@ async def cmd_mine(interaction: discord.Interaction):
     else:
         msg = "まだ申請していません"
     await interaction.response.send_message(msg, ephemeral=True)
+
+
+@tree.command(name="代理申請", description="【運営】Discordにいない人の申請を代わりに入力（同じ名前なら上書き）")
+@app_commands.describe(名前="ゲーム内の名前")
+@app_commands.guild_only()
+@admin
+async def cmd_proxy_apply(interaction: discord.Interaction, 名前: str):
+    await start_apply(interaction, proxy=名前.strip())
+
+
+async def proxy_answer_autocomplete(interaction: discord.Interaction, current: str):
+    names = [a["name"] for a in db.all_answers(interaction.guild_id) if a.get("proxy")]
+    return [app_commands.Choice(name=n, value=n) for n in names if current in n][:25]
+
+
+@tree.command(name="代理申請削除", description="【運営】代理で入力した申請を取り消す")
+@app_commands.autocomplete(名前=proxy_answer_autocomplete)
+@app_commands.guild_only()
+@admin
+async def cmd_proxy_apply_del(interaction: discord.Interaction, 名前: str):
+    db.delete_answer(interaction.guild_id, battle_bot.proxy_id(名前))
+    await interaction.response.send_message(f"🗑️ {名前} さんの代理申請を取り消しました", ephemeral=True)
+
+
+@tree.command(name="申請状況", description="【運営】誰が申請したかを確認")
+@app_commands.guild_only()
+@admin
+async def cmd_apply_status(interaction: discord.Interaction):
+    apps = sorted((a for a in db.all_answers(interaction.guild_id) if "fc" in a), key=lambda a: -a["fc"])
+    if not apps:
+        return await interaction.response.send_message("まだ申請がありません", ephemeral=True)
+    lines = [f"{a['name']}（{a['ally']}）火晶 {a['fc']:,}" + ("　※代理" if a.get("proxy") else "") for a in apps]
+    await interaction.response.send_message(f"**申請 {len(apps)}人**\n" + "\n".join(lines)[:1900], ephemeral=True)
 
 
 @tree.command(name="申請パネル", description="【運営】このチャンネルに申請ボタンを設置")
