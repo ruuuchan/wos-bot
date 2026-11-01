@@ -32,23 +32,24 @@ DEFAULTS = {
         "leader_min": 2 / 3,  # 集結主になれるのは、トップの人のこの割合以上の人だけ
         "reserve": {"name": "玉拾い", "min": 4},
         "abandoned": ["王室兵器工場"],
+        # side = L（左側・第1試験場側）／R（右側・第2試験場側）。2軍以降は同じ側の施設にしか出さない
         # count = 集結主の人数、need = 必要な強さ（トップの人を1とした割合）、prio = 強い人を回す順
         "places": [
-            {"name": "第1武器試験場", "count": 2, "prio": 1, "need": 0, "points": 74_400},
-            {"name": "第2武器試験場", "count": 2, "prio": 1, "need": 0, "points": 74_400},
-            {"name": "スチームボイラー", "count": 1, "prio": 2, "need": 0.75, "points": 14_880},
-            {"name": "兵器倉庫", "count": 1, "prio": 3, "need": 0.75, "points": 10_080},
-            {"name": "第1武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第2武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第3武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "第4武器修理工場", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
-            {"name": "傭兵野営地", "count": 1, "prio": 9, "need": 0.75, "points": 10_080},
-            {"name": "中継所", "count": 0, "prio": 99, "skip": True, "points": 14_880},
+            {"name": "第1武器試験場", "side": "L", "count": 2, "prio": 1, "need": 0, "points": 74_400},
+            {"name": "第2武器試験場", "side": "R", "count": 2, "prio": 1, "need": 0, "points": 74_400},
+            {"name": "スチームボイラー", "side": "L", "count": 1, "prio": 2, "need": 0.75, "points": 14_880},
+            {"name": "兵器倉庫", "side": "L", "count": 1, "prio": 3, "need": 0.75, "points": 10_080},
+            {"name": "第1武器修理工場", "side": "L", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第2武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第3武器修理工場", "side": "L", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "第4武器修理工場", "side": "R", "count": 1, "prio": 4, "need": 0.75, "points": 37_200},
+            {"name": "傭兵野営地", "side": "R", "count": 1, "prio": 9, "need": 0.75, "points": 10_080},
+            {"name": "中継所", "side": "R", "count": 0, "prio": 99, "skip": True, "points": 14_880},
             # 採取：集結主になれなかった中で強い人。足りなければ近い施設の人の5軍・6軍
-            {"name": "採取・右上", "count": 1, "prio": 50, "points": 28_750, "march": True},
-            {"name": "採取・右下", "count": 1, "prio": 50, "points": 28_750, "march": True},
-            {"name": "採取・左上", "count": 1, "prio": 50, "points": 28_750, "march": True},
-            {"name": "採取・左下", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・右上", "side": "R", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・右下", "side": "R", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・左上", "side": "L", "count": 1, "prio": 50, "points": 28_750, "march": True},
+            {"name": "採取・左下", "side": "L", "count": 1, "prio": 50, "points": 28_750, "march": True},
         ],
     },
     "canyon": {
@@ -233,12 +234,18 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
         hs = homes_of(m)
         return min((d2(h, place["name"]) for h in hs), default=0)
 
+    side = {p["name"]: p.get("side") for p in places}
+
+    def same_side(m, place):  # 2軍以降は、1軍と同じ側（左／右）の施設だけ
+        sd = side.get(place["name"])
+        return not sd or all(side.get(h) in (None, sd) for h in homes_of(m))
+
     lab_names_all = {p["name"] for p in labs}
     for p in order:
         # 試験場同士は遠いので、もう片方の試験場にいる人の2軍は使わない
         g = next(((m, k) for m, k in cands
                   if (id(m), k) not in used and next_free(m) == k and not here(m, p)
-                  and not (set(homes_of(m)) & (lab_names_all - {p["name"]}))), None)
+                  and not (set(homes_of(m)) & (lab_names_all - {p["name"]})) and (k == 1 or same_side(m, p))), None)
         if g:
             take(g[0], g[1], p)
     # 3. その他の施設
@@ -248,7 +255,7 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
             g = None
             for k in MARCH_RATE:
                 ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k
-                      and m["value"] * MARCH_RATE[k] >= line and not here(m, p)]
+                      and m["value"] * MARCH_RATE[k] >= line and not here(m, p) and (k == 1 or same_side(m, p))]
                 if ok:
                     # 1軍は強い人から。2軍以降は、その人がいる施設から近い人を優先（同じくらいなら強い人）
                     g = (min(ok, key=lambda m: (near(m, p) if k > 1 else 0, -m["value"])), k)
@@ -285,7 +292,9 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
     gave = set()
     for p in gathers:
         if not slots.get(p["name"]) and homes:
-            pool_h = [h for h in homes if h[0]["name"] not in gave] or homes
+            sd = p.get("side")
+            same = [h for h in homes if not sd or next((q.get("side") for q in places if q["name"] == h[1]), None) in (None, sd)]
+            pool_h = [h for h in same if h[0]["name"] not in gave] or same or homes
             m, home = min(pool_h, key=lambda h: dist(p["name"], h[1]))
             gave.add(m["name"])
             base_m = {k: v for k, v in m.items() if k not in ("march_no", "eff")}
@@ -375,6 +384,19 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
     h = 200 + (106 if show_points else 0) + (70 if short else 0)
     for p, ms in taken:
         h += PH + RH * max(1, len(ms)) + 16 + (38 if p.get("note") else 0)
+    SIDES = [("L", "◀ 左側（第1試験場側）"), ("R", "右側（第2試験場側） ▶")]
+    has_side = any(p.get("side") for p, _ in taken)
+    if has_side:
+        seq = []
+        for sd, title in SIDES + [(None, "")]:
+            grp = [(p, ms) for p, ms in taken if p.get("side") == sd]
+            if grp:
+                if title:
+                    seq.append(("hdr", title))
+                seq += [("pl", t) for t in grp]
+        h += 64 * sum(1 for k, _ in seq if k == "hdr")
+    else:
+        seq = [("pl", t) for t in taken]
     if drop:
         h += 60 + 40 * len(drop)
     if fb:
@@ -412,7 +434,13 @@ def render_legion(event_name, legion, metric, members, places, reserve, target, 
         y += bh + 24
     y += 10
 
-    for p, ms in taken:
+    for kind, item in seq:
+        if kind == "hdr":
+            d.text((48, y + 14), item, font=f(30, True), fill="#7fa7d9")
+            d.line([24, y + 56, W - 24, y + 56], fill="#4a90e2", width=3)
+            y += 64
+            continue
+        p, ms = item
         d.rounded_rectangle([24, y, W - 24, y + PH - 8], 10, fill="#4a3300" if p["name"] in spare else "#1d3557")
         d.text((48, y + 10), p["name"] + ("（余裕があれば）" if p["name"] in spare else ""), font=f(28, True), fill=TXT)
         nm_ = sum(1 for m in ms if not m.get("sub"))
@@ -559,6 +587,13 @@ def render_map(ev, event_name, legion, metric, members, places, reserve, min_mem
     for cx, col, lab in [(70, "#54a0ff", "Safe zone"), (W - 70, "#ff6b6b", "Safe zone")]:
         d.polygon([(cx, 740), (cx + 44, 784), (cx, 828), (cx - 44, 784)], outline=col, width=4)
         d.text((cx, 850), lab, font=f(20, True), fill=col, anchor="ma")
+    # 左側・右側の境目
+    if any(p.get("side") for p in places):
+        for y0_, y1_ in ((190, 622), (908, 1430)):
+            for yy_ in range(y0_, y1_, 24):
+                d.line([540, yy_, 540, min(yy_ + 12, y1_)], fill="#3a4d6b", width=2)
+        d.text((120, 190), "◀ 左側", font=f(22, True), fill="#7fa7d9")
+        d.text((W - 120, 190), "右側 ▶", font=f(22, True), fill="#7fa7d9", anchor="ra")
     # 中央
     d.ellipse([400, 625, 680, 905], outline="#4b5d75", width=3, fill="#1f2b40")
     d.text((540, 730), MAPS[ev]["center"], font=f(22, True), fill=DIM, anchor="mm")
