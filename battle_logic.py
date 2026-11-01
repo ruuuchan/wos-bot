@@ -217,8 +217,12 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
                 order.append(p)
         fwd = not fwd
     cands = sorted(((m, k) for k in MARCH_RATE for m in elig), key=lambda g: (g[1], -g[0]["value"]))
+    def here(m, place):  # 同じ施設に同じ人の行軍は2つ出せない
+        return any(x.get("name") == m["name"] for x in slots.get(place["name"], []))
+
     for p in order:
-        g = next(((m, k) for m, k in cands if (id(m), k) not in used and next_free(m) == k), None)
+        g = next(((m, k) for m, k in cands
+                  if (id(m), k) not in used and next_free(m) == k and not here(m, p)), None)
         if g:
             take(g[0], g[1], p)
     # 3. その他の施設
@@ -227,7 +231,8 @@ def assign_rally(members, places, reserve_min, pos=None, leader_min=2 / 3):
         for _ in range(p["count"]):
             g = None
             for k in MARCH_RATE:
-                ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k and m["value"] * MARCH_RATE[k] >= line]
+                ok = [m for m in elig if (id(m), k) not in used and next_free(m) == k
+                      and m["value"] * MARCH_RATE[k] >= line and not here(m, p)]
                 if ok:
                     g = (max(ok, key=lambda m: m["value"]), k)
                     break
