@@ -111,8 +111,11 @@ def parse_event(e, lo=None, hi=None):
     except Exception:
         return []
     sd, ed = s.date(), en.date()
-    if e.get("all_day") and ed > sd and en.time() == dt.time(0, 0):
-        ed -= dt.timedelta(days=1)  # 終日予定の終わりは「翌日0時」になっていることがある
+    rules = recurrence_rules(e)
+    # 終日予定の終わりは「翌日0時」になっていることがある（1回だけの予定）。
+    # 繰り返しの予定は、終わりの日がそのまま最終日になっている
+    if e.get("all_day") and ed > sd and en.time() == dt.time(0, 0) and not rules:
+        ed -= dt.timedelta(days=1)
     if ed < sd:
         ed = sd
     color = None
@@ -123,7 +126,6 @@ def parse_event(e, lo=None, hi=None):
     base = {"title": e.get("title") or "", "color": color,
             "time": None if e.get("all_day") else s.strftime("%H:%M")}
     span = ed - sd
-    rules = recurrence_rules(e)
     if not rules or lo is None:
         return [dict(base, start=sd, end=ed)]
     try:
