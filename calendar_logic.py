@@ -63,13 +63,40 @@ async def fetch_month(cal_id: str, year: int, month: int):
             if page >= (paging.get("total_pages") or 1):
                 break
             page += 1
-    out = [parse_event(e) for e in events]
-    out = [e for e in out if e]
+    # 繰り返しの予定は、前後1か月分まで展開する
+    lo = dt.date(year, month, 1) - dt.timedelta(days=40)
+    hi = dt.date(year, month, 1) + dt.timedelta(days=72)
+    out = []
+    for e in events:
+        out += parse_event(e, lo, hi)
     _cache[key] = (time.time(), out)
     return out
 
 
-def parse_event(e):
+def recurrence_rules(e):
+    """予定データの中から繰り返しのルール（RRULE/EXDATE）を探す"""
+    rules = []
+
+    def walk(v):
+        if isinstance(v, str):
+            for line in v.replace("\\n", "\n").splitlines():
+                if line.strip().upper().startswith(("RRULE", "EXDATE", "RDATE", "FREQ=")):
+                    rules.append(line.strip())
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+
+    for k, v in e.items():
+        if "recur" in k.lower() or "rrule" in k.lower() or "repeat" in k.lower():
+            walk(v)
+    return rules
+
+
+def parse_event(e, lo=None, hi=None):
+    """1件の予定 → 表示用の予定のリスト（繰り返しなら lo〜hi の間に出てくる回をすべて）"""
     # 終日予定はUTCの0時で入っていることが多いので、そのときはUTCのまま日付にする
     if e.get("all_day") and (e.get("start_timezone") in (None, "UTC")):
         tz = ZoneInfo("UTC")
@@ -82,7 +109,7 @@ def parse_event(e):
         s = dt.datetime.fromtimestamp(e["start_at"] / 1000, tz)
         en = dt.datetime.fromtimestamp(e["end_at"] / 1000, tz)
     except Exception:
-        return None
+        return []
     sd, ed = s.date(), en.date()
     if e.get("all_day") and ed > sd and en.time() == dt.time(0, 0):
         ed -= dt.timedelta(days=1)  # 終日予定の終わりは「翌日0時」になっていることがある
@@ -93,8 +120,27 @@ def parse_event(e):
         v = e.get(k)
         if isinstance(v, str) and re.fullmatch(r"#?[0-9A-Fa-f]{6}", v):
             color = "#" + v.lstrip("#")
-    return {"title": e.get("title") or "", "start": sd, "end": ed, "color": color,
+    base = {"title": e.get("title") or "", "color": color,
             "time": None if e.get("all_day") else s.strftime("%H:%M")}
+    span = ed - sd
+    rules = recurrence_rules(e)
+    if not rules or lo is None:
+        return [dict(base, start=sd, end=ed)]
+    try:
+        from dateutil.rrule import rrulestr
+        naive = s.replace(tzinfo=None)
+        lines = [r if r.upper().startswith(("RRULE", "EXDATE", "RDATE")) else "RRULE:" + r for r in rules]
+        text = "\n".join(lines)
+        # UNTIL などに付いている「Z」（UTC）を外して、開始日時と同じ扱いにする
+        text = re.sub(r"(UNTIL=\d{8}T\d{6})Z", r"\1", text)
+        rs = rrulestr(text, dtstart=naive, forceset=True, ignoretz=True)
+        a = dt.datetime.combine(lo, dt.time.min) - span
+        b = dt.datetime.combine(hi, dt.time.max)
+        out = [dict(base, start=o.date(), end=o.date() + span) for o in rs.between(a, b, inc=True)]
+        return out
+    except Exception as ex:
+        print(f"繰り返しの展開に失敗 {base['title']} {rules}: {ex!r}")
+        return [dict(base, start=sd, end=ed)]
 
 
 # ---------- 画像 ----------
