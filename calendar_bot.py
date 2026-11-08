@@ -34,12 +34,41 @@ def link_view(cal_id):
     v = discord.ui.View()
     ids = [c for c in cal_id.split(",") if c][:5]
     for i, c in enumerate(ids, 1):
-        label = "TimeTreeで開く" if len(ids) == 1 else f"TimeTreeで開く（{i}）"
+        label = "TimeTreeで開く" if len(ids) == 1 else "TimeTreeで開く" + "①②③④⑤"[i - 1]
         v.add_item(discord.ui.Button(label=label, url=f"https://timetreeapp.com/public_calendars/{c}"))
     return v
 
 
 WEEKDAYS = "月火水木金土日"
+
+
+def targets(gid, kind=None):
+    """出すカレンダーの一覧（省略すると両方＝2枚）"""
+    main = cal_of(gid)
+    if kind == "main":
+        return [main]
+    if kind == "other":
+        return [OTHER_CAL]
+    return [main] + ([OTHER_CAL] if OTHER_CAL not in main.split(",") else [])
+
+
+def tag(cal_id, many):
+    """2枚出すときに見分けるための印"""
+    if not many:
+        return ""
+    return "　②" if cal_id == OTHER_CAL else "　①"
+
+
+async def images(ids, make, name):
+    """カレンダーごとに画像を作る（読めなかった分は飛ばす）"""
+    files = []
+    for i, cid in enumerate(ids, 1):
+        try:
+            img = await make(cid, tag(cid, len(ids) > 1))
+            files.append(discord.File(img, f"{name}_{i}.png"))
+        except Exception as e:
+            print(f"カレンダー取得エラー {cid}: {e!r}")
+    return files
 
 
 async def events_around(cal_id, days):
@@ -68,17 +97,17 @@ async def events_around(cal_id, days):
     return uniq
 
 
-async def month_image(cal_id, y, m, today):
+async def month_image(cal_id, y, m, today, mark=""):
     evs = await events_around(cal_id, [dt.date(y, m, 1)])
-    return await asyncio.to_thread(C.render_month, evs, y, m, f"イベントカレンダー　{y}年{m}月", today)
+    return await asyncio.to_thread(C.render_month, evs, y, m, f"イベントカレンダー　{y}年{m}月{mark}", today)
 
 
-async def week_image(cal_id, monday, today):
+async def week_image(cal_id, monday, today, mark=""):
     days = [monday + dt.timedelta(days=i) for i in range(7)]
     evs = await events_around(cal_id, days)
     sunday = days[-1]
     which = "今週" if monday <= today <= sunday else "来週" if monday > today else "先週"
-    title = f"{which}の予定　{monday.month}/{monday.day}（月）〜{sunday.month}/{sunday.day}（日）"
+    title = f"{which}の予定　{monday.month}/{monday.day}（月）〜{sunday.month}/{sunday.day}（日）{mark}"
     return await asyncio.to_thread(C.render_week, evs, monday, title, today)
 
 
@@ -107,9 +136,11 @@ async def weekly_post():
             monday = today - dt.timedelta(days=today.weekday())
             if today.weekday() >= 5:  # 土日に投稿するときは来週の予定
                 monday += dt.timedelta(weeks=1)
-            cal_id = cal_of(gid)
-            img = await week_image(cal_id, monday, today)
-            await ch.send(content="📅 **" + ("来週" if monday > today else "今週") + "の予定**", file=discord.File(img, "week.png"), view=link_view(cal_id))
+            ids = targets(gid)
+            files = await images(ids, lambda c, mk: week_image(c, monday, today, mk), "week")
+            if files:
+                await ch.send(content="📅 **" + ("来週" if monday > today else "今週") + "の予定**", files=files,
+                              view=link_view(",".join(ids)))
         except Exception as e:
             print(f"週間カレンダー自動投稿に失敗 guild={gid}: {e!r}")
 
@@ -129,10 +160,11 @@ async def weekly_post():
         db.set_setting(gid, "cal_monthly", json.dumps(cfg))
         try:
             ch = _client.get_channel(cfg["channel"]) or await _client.fetch_channel(cfg["channel"])
-            cal_id = cal_of(gid)
-            img = await month_image(cal_id, now.year, now.month, now.date())
-            await ch.send(content=f"🗓️ **{now.month}月のスケジュール**", file=discord.File(img, "month.png"),
-                          view=link_view(cal_id))
+            ids = targets(gid)
+            files = await images(ids, lambda c, mk: month_image(c, now.year, now.month, now.date(), mk), "month")
+            if files:
+                await ch.send(content=f"🗓️ **{now.month}月のスケジュール**", files=files,
+                              view=link_view(",".join(ids)))
         except Exception as e:
             print(f"月間カレンダー自動投稿に失敗 guild={gid}: {e!r}")
 
@@ -153,26 +185,26 @@ def start(client):
 def setup(tree: app_commands.CommandTree, admin):
     @tree.command(name="カレンダー", description="ホワサバのイベントカレンダーを表示")
     @app_commands.choices(月=[app_commands.Choice(name="今月", value=0), app_commands.Choice(name="来月", value=1)])
-    @app_commands.describe(月="今月か来月", 種類="どちらのカレンダーを出すか（省略するといつもの）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
-    @app_commands.choices(種類=[app_commands.Choice(name="いつもの（a_4297）", value="main"),
-                               app_commands.Choice(name="もう一つ（b_4297）", value="other")])
+    @app_commands.describe(月="今月か来月", 種類="どのカレンダーを出すか（省略すると両方の2枚）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.choices(種類=[app_commands.Choice(name="両方（2枚）", value="both"),
+                               app_commands.Choice(name="①だけ（a_4297）", value="main"),
+                               app_commands.Choice(name="②だけ（b_4297）", value="other")])
     @app_commands.guild_only()
     async def cmd_calendar(interaction: discord.Interaction, 月: app_commands.Choice[int] | None = None,
                            種類: app_commands.Choice[str] | None = None, 全員に見せる: bool = False):
         await interaction.response.defer(thinking=True, ephemeral=not 全員に見せる)
-        cal_id = OTHER_CAL if 種類 and 種類.value == "other" else cal_of(interaction.guild_id)
+        ids = targets(interaction.guild_id, 種類.value if 種類 else None)
+        cal_id = ",".join(ids)
         today = dt.datetime.now(C.JST).date()
         y, m = today.year, today.month + (月.value if 月 else 0)
         if m > 12:
             y, m = y + 1, m - 12
-        try:
-            img = await month_image(cal_id, y, m, today)
-        except Exception as e:
-            print(f"カレンダー取得エラー: {e!r}")
+        files = await images(ids, lambda c, mk: month_image(c, y, m, today, mk), f"calendar_{y}{m:02d}")
+        if not files:
             return await interaction.followup.send(
                 "TimeTreeからカレンダーを読み込めませんでした。少し待ってからもう一度試すか、下のボタンから直接見てください。",
                 view=link_view(cal_id), ephemeral=not 全員に見せる)
-        await interaction.followup.send(file=discord.File(img, f"calendar_{y}{m:02d}.png"),
+        await interaction.followup.send(files=files,
                                         view=link_view(cal_id), ephemeral=not 全員に見せる)
 
     @tree.command(name="カレンダー設定", description="【運営】表示するTimeTree公開カレンダーのURLを変える")
@@ -191,23 +223,23 @@ def setup(tree: app_commands.CommandTree, admin):
 
     @tree.command(name="今週の予定", description="今週（または来週）のイベント予定を表示")
     @app_commands.choices(週=[app_commands.Choice(name="今週", value=0), app_commands.Choice(name="来週", value=1)])
-    @app_commands.describe(週="今週か来週", 種類="どちらのカレンダーを出すか（省略するといつもの）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
-    @app_commands.choices(種類=[app_commands.Choice(name="いつもの（a_4297）", value="main"),
-                               app_commands.Choice(name="もう一つ（b_4297）", value="other")])
+    @app_commands.describe(週="今週か来週", 種類="どのカレンダーを出すか（省略すると両方の2枚）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.choices(種類=[app_commands.Choice(name="両方（2枚）", value="both"),
+                               app_commands.Choice(name="①だけ（a_4297）", value="main"),
+                               app_commands.Choice(name="②だけ（b_4297）", value="other")])
     @app_commands.guild_only()
     async def cmd_week(interaction: discord.Interaction, 週: app_commands.Choice[int] | None = None,
                        種類: app_commands.Choice[str] | None = None, 全員に見せる: bool = False):
         await interaction.response.defer(thinking=True, ephemeral=not 全員に見せる)
-        cal_id = OTHER_CAL if 種類 and 種類.value == "other" else cal_of(interaction.guild_id)
+        ids = targets(interaction.guild_id, 種類.value if 種類 else None)
+        cal_id = ",".join(ids)
         today = dt.datetime.now(C.JST).date()
         monday = today - dt.timedelta(days=today.weekday()) + dt.timedelta(weeks=週.value if 週 else 0)
-        try:
-            img = await week_image(cal_id, monday, today)
-        except Exception as e:
-            print(f"カレンダー取得エラー: {e!r}")
+        files = await images(ids, lambda c, mk: week_image(c, monday, today, mk), "week")
+        if not files:
             return await interaction.followup.send("TimeTreeからカレンダーを読み込めませんでした。下のボタンから直接見てください。",
                                                    view=link_view(cal_id), ephemeral=not 全員に見せる)
-        await interaction.followup.send(file=discord.File(img, "week.png"), view=link_view(cal_id),
+        await interaction.followup.send(files=files, view=link_view(cal_id),
                                         ephemeral=not 全員に見せる)
 
     @tree.command(name="週間カレンダー自動投稿", description="【運営】毎週、その週の予定をこのチャンネルに自動投稿")
