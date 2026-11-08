@@ -17,6 +17,7 @@ import config
 import db
 import render
 import battle_bot
+import calendar_bot
 from allocate import allocate
 
 WEEK = "月火水木金土日"
@@ -447,6 +448,7 @@ def staff_text(guild, st):
 
 
 battle_bot.setup(tree, admin)  # 兵器工場・峡谷の振り分け
+calendar_bot.setup(tree, admin)  # TimeTreeのイベントカレンダー
 
 
 @tree.command(name="申請", description="準備フェーズの申請（何度でも直せます）")
