@@ -341,6 +341,7 @@ class Bot(discord.Client):
             print(f"持ち主の確認に失敗: {e!r}")
         self.add_view(Panel())
         battle_bot.add_views(self)
+        calendar_bot.start(self)
         auto_post.start()
         if config.GUILD_IDS:
             for gid in config.GUILD_IDS:

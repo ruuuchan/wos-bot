@@ -116,9 +116,19 @@ def event_color(ev):
 
 
 def render_month(events, year, month, title="", today=None):
+    weeks = pycal.Calendar(firstweekday=0).monthdatescalendar(year, month)
+    return render_weeks(events, weeks, title, today, month=month)
+
+
+def render_week(events, monday, title="", today=None):
+    """1週間分（月〜日）"""
+    week = [monday + dt.timedelta(days=i) for i in range(7)]
+    return render_weeks(events, [week], title, today, month=None)
+
+
+def render_weeks(events, weeks, title="", today=None, month=None):
     W = 1170
     CW = W // 7
-    weeks = pycal.Calendar(firstweekday=0).monthdatescalendar(year, month)
     LANE, HEAD = 48, 70
     rows = []
     for wk in weeks:
@@ -157,7 +167,7 @@ def render_month(events, year, month, title="", today=None):
         d.line([0, y, W, y], fill=GRID, width=2)
         for i, day in enumerate(wk):
             x = i * CW + CW // 2
-            other = day.month != month
+            other = month is not None and day.month != month
             col = RED if i == 6 else BLUE if i == 5 else TXT
             if day == today:
                 d.rectangle([i * CW, y + 1, (i + 1) * CW, y + rh], fill="#f2f2f2")
@@ -165,7 +175,10 @@ def render_month(events, year, month, title="", today=None):
                 col = "#ffffff"
             elif other:
                 col = "#cfd8f5" if i == 5 else "#f2b8b6" if i == 6 else "#bbbbbb"
-            d.text((x, y + 34), str(day.day), font=f(32, day == today), fill=col, anchor="mm")
+            label = str(day.day) if month is not None or i else f"{day.month}/{day.day}"
+            if month is None and day.day == 1 and i:
+                label = f"{day.month}/{day.day}"
+            d.text((x, y + 34), label, font=f(32, day == today), fill=col, anchor="mm")
         for li, ci, cj, e in placed:
             x0, x1 = ci * CW + 8, (cj + 1) * CW - 8
             yy = y + HEAD + li * LANE
