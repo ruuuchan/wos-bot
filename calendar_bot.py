@@ -20,6 +20,7 @@ from discord import app_commands
 import db
 import calendar_logic as C
 
+OTHER_CAL = "b_4297"  # 「もう一つのカレンダー」（/カレンダー 種類:もう一つ で表示）
 DEFAULT_CAL = "a_4297"  # 複数のカレンダーはカンマ区切り（予定は1枚にまとめて表示）
 COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止",
             "月間カレンダー自動投稿", "月間カレンダー停止"]
@@ -152,12 +153,14 @@ def start(client):
 def setup(tree: app_commands.CommandTree, admin):
     @tree.command(name="カレンダー", description="ホワサバのイベントカレンダーを表示")
     @app_commands.choices(月=[app_commands.Choice(name="今月", value=0), app_commands.Choice(name="来月", value=1)])
-    @app_commands.describe(月="今月か来月", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.describe(月="今月か来月", 種類="どちらのカレンダーを出すか（省略するといつもの）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.choices(種類=[app_commands.Choice(name="いつもの（a_4297）", value="main"),
+                               app_commands.Choice(name="もう一つ（b_4297）", value="other")])
     @app_commands.guild_only()
     async def cmd_calendar(interaction: discord.Interaction, 月: app_commands.Choice[int] | None = None,
-                           全員に見せる: bool = False):
+                           種類: app_commands.Choice[str] | None = None, 全員に見せる: bool = False):
         await interaction.response.defer(thinking=True, ephemeral=not 全員に見せる)
-        cal_id = cal_of(interaction.guild_id)
+        cal_id = OTHER_CAL if 種類 and 種類.value == "other" else cal_of(interaction.guild_id)
         today = dt.datetime.now(C.JST).date()
         y, m = today.year, today.month + (月.value if 月 else 0)
         if m > 12:
@@ -188,12 +191,14 @@ def setup(tree: app_commands.CommandTree, admin):
 
     @tree.command(name="今週の予定", description="今週（または来週）のイベント予定を表示")
     @app_commands.choices(週=[app_commands.Choice(name="今週", value=0), app_commands.Choice(name="来週", value=1)])
-    @app_commands.describe(週="今週か来週", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.describe(週="今週か来週", 種類="どちらのカレンダーを出すか（省略するといつもの）", 全員に見せる="はい＝チャンネルのみんなに見える形で出す（省略すると自分だけに表示）")
+    @app_commands.choices(種類=[app_commands.Choice(name="いつもの（a_4297）", value="main"),
+                               app_commands.Choice(name="もう一つ（b_4297）", value="other")])
     @app_commands.guild_only()
     async def cmd_week(interaction: discord.Interaction, 週: app_commands.Choice[int] | None = None,
-                       全員に見せる: bool = False):
+                       種類: app_commands.Choice[str] | None = None, 全員に見せる: bool = False):
         await interaction.response.defer(thinking=True, ephemeral=not 全員に見せる)
-        cal_id = cal_of(interaction.guild_id)
+        cal_id = OTHER_CAL if 種類 and 種類.value == "other" else cal_of(interaction.guild_id)
         today = dt.datetime.now(C.JST).date()
         monday = today - dt.timedelta(days=today.weekday()) + dt.timedelta(weeks=週.value if 週 else 0)
         try:
