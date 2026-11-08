@@ -28,6 +28,9 @@ HOURS = 24                            # 対象期間の長さ（時間）
 
 # 実行環境
 TOKEN = os.environ.get("DISCORD_TOKEN", "")
+# カレンダー（TimeTree）のコマンドを出すサーバー（ほかのサーバーには出さない）
+CALENDAR_GUILDS = [int(x) for x in os.environ.get("CALENDAR_GUILD_ID", "1504511054422609920").replace(" ", "").split(",") if x.isdigit()]
+
 # コマンドを使えるようにするサーバーのID。複数ならカンマ区切り（例：111,222）
 GUILD_IDS = [int(x) for x in os.environ.get("GUILD_ID", "").replace(" ", "").split(",") if x.isdigit()]
 DB_PATH = os.environ.get("DB_PATH", "data.db")

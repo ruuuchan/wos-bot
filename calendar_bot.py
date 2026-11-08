@@ -19,6 +19,7 @@ import db
 import calendar_logic as C
 
 DEFAULT_CAL = "a_4297"
+COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止"]
 
 
 def cal_of(gid):

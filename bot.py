@@ -346,7 +346,7 @@ class Bot(discord.Client):
         if config.GUILD_IDS:
             for gid in config.GUILD_IDS:
                 g = discord.Object(id=gid)
-                self.tree.copy_global_to(guild=g)
+                self.prepare_guild(g)
                 try:
                     await self.tree.sync(guild=g)
                 except discord.HTTPException as e:  # まだ招待されていないサーバーなど
@@ -357,8 +357,15 @@ class Bot(discord.Client):
     async def on_guild_join(self, guild: discord.Guild):
         """許可済みのサーバーに後から招待されたら、すぐコマンドを使えるようにする"""
         if guild.id in config.GUILD_IDS:
-            self.tree.copy_global_to(guild=guild)
+            self.prepare_guild(guild)
             await self.tree.sync(guild=guild)
+
+    def prepare_guild(self, g):
+        """そのサーバーに出すコマンドを用意（カレンダーは決めたサーバーだけ）"""
+        self.tree.copy_global_to(guild=g)
+        if g.id not in config.CALENDAR_GUILDS:
+            for name in calendar_bot.COMMANDS:
+                self.tree.remove_command(name, guild=g)
 
 
 bot = Bot()
