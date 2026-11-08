@@ -20,7 +20,7 @@ from discord import app_commands
 import db
 import calendar_logic as C
 
-DEFAULT_CAL = "a_4297,b_4297"  # 複数のカレンダーはカンマ区切り（予定は1枚にまとめて表示）
+DEFAULT_CAL = "a_4297"  # 複数のカレンダーはカンマ区切り（予定は1枚にまとめて表示）
 COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止",
             "月間カレンダー自動投稿", "月間カレンダー停止"]
 
