@@ -5,6 +5,8 @@
 /カレンダー設定        … 【運営】読み込むTimeTree公開カレンダーのURLを変える
 /週間カレンダー自動投稿 … 【運営】毎週決まった曜日・時刻に、その週の予定をこのチャンネルへ自動投稿
 /週間カレンダー停止    … 【運営】自動投稿を止める
+/月間カレンダー自動投稿 … 【運営】毎月1日に、その月のカレンダーをこのチャンネルへ自動投稿
+/月間カレンダー停止    … 【運営】毎月の自動投稿を止める
 """
 import asyncio
 import datetime as dt
@@ -19,7 +21,8 @@ import db
 import calendar_logic as C
 
 DEFAULT_CAL = "a_4297"
-COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止"]
+COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止",
+            "月間カレンダー自動投稿", "月間カレンダー停止"]
 
 
 def cal_of(gid):
@@ -51,6 +54,11 @@ async def events_around(cal_id, days):
             seen.add(k)
             uniq.append(e)
     return uniq
+
+
+async def month_image(cal_id, y, m, today):
+    evs = await events_around(cal_id, [dt.date(y, m, 1)])
+    return await asyncio.to_thread(C.render_month, evs, y, m, f"イベントカレンダー　{y}年{m}月", today)
 
 
 async def week_image(cal_id, monday, today):
@@ -94,6 +102,29 @@ async def weekly_post():
             print(f"週間カレンダー自動投稿に失敗 guild={gid}: {e!r}")
 
 
+    # 毎月1日の自動投稿
+    for gid, raw in db.guilds_with("cal_monthly"):
+        try:
+            cfg = json.loads(raw)
+        except Exception:
+            continue
+        if not cfg.get("on") or now.day != 1 or now.hour != cfg["hour"]:
+            continue
+        stamp = now.strftime("%Y-%m")
+        if cfg.get("last") == stamp:
+            continue
+        cfg["last"] = stamp
+        db.set_setting(gid, "cal_monthly", json.dumps(cfg))
+        try:
+            ch = _client.get_channel(cfg["channel"]) or await _client.fetch_channel(cfg["channel"])
+            cal_id = cal_of(gid)
+            img = await month_image(cal_id, now.year, now.month, now.date())
+            await ch.send(content=f"🗓️ **{now.month}月のスケジュール**", file=discord.File(img, "month.png"),
+                          view=link_view(cal_id))
+        except Exception as e:
+            print(f"月間カレンダー自動投稿に失敗 guild={gid}: {e!r}")
+
+
 @weekly_post.before_loop
 async def _wait():
     await _client.wait_until_ready()
@@ -121,14 +152,12 @@ def setup(tree: app_commands.CommandTree, admin):
         if m > 12:
             y, m = y + 1, m - 12
         try:
-            # 月をまたぐ予定も出すため、前後の月も読む
-            uniq = await events_around(cal_id, [dt.date(y, m, 1)])
+            img = await month_image(cal_id, y, m, today)
         except Exception as e:
             print(f"カレンダー取得エラー: {e!r}")
             return await interaction.followup.send(
                 "TimeTreeからカレンダーを読み込めませんでした。少し待ってからもう一度試すか、下のボタンから直接見てください。",
                 view=link_view(cal_id), ephemeral=not 全員に見せる)
-        img = await asyncio.to_thread(C.render_month, uniq, y, m, f"イベントカレンダー　{y}年{m}月", today)
         await interaction.followup.send(file=discord.File(img, f"calendar_{y}{m:02d}.png"),
                                         view=link_view(cal_id), ephemeral=not 全員に見せる)
 
@@ -187,3 +216,25 @@ def setup(tree: app_commands.CommandTree, admin):
             cfg["on"] = False
             db.set_setting(interaction.guild_id, "cal_weekly", json.dumps(cfg))
         await interaction.response.send_message("⏹️ 週間カレンダーの自動投稿を止めました", ephemeral=True)
+
+    @tree.command(name="月間カレンダー自動投稿", description="【運営】毎月1日に、その月のカレンダーをこのチャンネルに自動投稿")
+    @app_commands.describe(時刻="投稿する時刻（0〜23時、省略すると9時）")
+    @app_commands.guild_only()
+    @admin
+    async def cmd_monthly(interaction: discord.Interaction, 時刻: app_commands.Range[int, 0, 23] = 9):
+        cfg = {"on": True, "channel": interaction.channel_id, "hour": 時刻, "last": ""}
+        db.set_setting(interaction.guild_id, "cal_monthly", json.dumps(cfg))
+        await interaction.response.send_message(
+            f"✅ 毎月1日の{時刻}時に、このチャンネルへその月のカレンダーを自動投稿します\n止めるときは /月間カレンダー停止",
+            ephemeral=True)
+
+    @tree.command(name="月間カレンダー停止", description="【運営】毎月のカレンダー自動投稿を止める")
+    @app_commands.guild_only()
+    @admin
+    async def cmd_monthly_stop(interaction: discord.Interaction):
+        raw = db.get_setting(interaction.guild_id, "cal_monthly", "")
+        if raw:
+            cfg = json.loads(raw)
+            cfg["on"] = False
+            db.set_setting(interaction.guild_id, "cal_monthly", json.dumps(cfg))
+        await interaction.response.send_message("⏹️ 毎月のカレンダー自動投稿を止めました", ephemeral=True)
