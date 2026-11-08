@@ -52,17 +52,22 @@ async def fetch_month(cal_id: str, year: int, month: int):
         }
         if m:
             headers["X-CSRF-Token"] = m.group(1)
-        events, page = [], 1
-        while page <= 10:
+        events, seen, cursor = [], set(), None
+        for _ in range(10):  # 1回で30件まで。続きがあれば next_cursor で次を読む
             url = f"{BASE}/api/v2/public_calendars/{cal_id}/public_events"
-            async with s.get(url, params={"year": year, "month": month, "page": page}, headers=headers) as r:
+            params = {"year": year, "month": month}
+            if cursor:
+                params["cursor"] = cursor
+            async with s.get(url, params=params, headers=headers) as r:
                 r.raise_for_status()
                 data = await r.json(content_type=None)
-            events += data.get("public_events", [])
+            new = [e for e in data.get("public_events", []) if e.get("id") not in seen]
+            seen.update(e.get("id") for e in new)
+            events += new
             paging = data.get("paging") or {}
-            if page >= (paging.get("total_pages") or 1):
+            cursor = paging.get("next_cursor")
+            if not new or not paging.get("next") or not cursor:
                 break
-            page += 1
     # 繰り返しの予定は、前後1か月分まで展開する
     lo = dt.date(year, month, 1) - dt.timedelta(days=40)
     hi = dt.date(year, month, 1) + dt.timedelta(days=72)
@@ -95,6 +100,16 @@ def recurrence_rules(e):
     return rules
 
 
+# TimeTreeの画面は、保存されている色を少し落ち着いた色にして表示している。
+# 画面と同じに見えるよう、保存色 → 画面の色 に置きかえる（TimeTreeの画面から測った値）
+SHOWN = {
+    "#e73b3b": "#d74a41",  # 赤
+    "#fdc02d": "#f4c251",  # 黄
+    "#948078": "#918079",  # 茶
+    "#b38bdc": "#ac8cd7",  # 紫
+}
+
+
 def parse_event(e, lo=None, hi=None):
     """1件の予定 → 表示用の予定のリスト（繰り返しなら lo〜hi の間に出てくる回をすべて）"""
     # 終日予定はUTCの0時で入っていることが多いので、そのときはUTCのまま日付にする
@@ -125,6 +140,8 @@ def parse_event(e, lo=None, hi=None):
         if isinstance(v, str) and re.fullmatch(r"#?[0-9A-Fa-f]{6}", v):
             color = "#" + v.lstrip("#")
             break
+    if color:
+        color = SHOWN.get(color.lower(), color)
     base = {"title": e.get("title") or "", "color": color,
             "time": None if e.get("all_day") else s.strftime("%H:%M")}
     span = ed - sd
