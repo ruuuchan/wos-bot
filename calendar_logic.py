@@ -112,10 +112,8 @@ def parse_event(e, lo=None, hi=None):
         return []
     sd, ed = s.date(), en.date()
     rules = recurrence_rules(e)
-    # 終日予定の終わりは「翌日0時」になっていることがある（1回だけの予定）。
-    # 繰り返しの予定は、終わりの日がそのまま最終日になっている
-    if e.get("all_day") and ed > sd and en.time() == dt.time(0, 0) and not rules:
-        ed -= dt.timedelta(days=1)
+    # TimeTreeの終日予定は「最終日の0時」が終わりとして入っている（1日だけなら開始＝終了）。
+    # なので1日引かずに、そのまま最終日として使う
     if ed < sd:
         ed = sd
     color = None  # TimeTreeで付けた色（数値 4047560 → #3dc2c8 のように変換）
