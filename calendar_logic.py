@@ -175,9 +175,9 @@ def render_weeks(events, weeks, title="", today=None, month=None):
                 col = "#ffffff"
             elif other:
                 col = "#cfd8f5" if i == 5 else "#f2b8b6" if i == 6 else "#bbbbbb"
-            label = str(day.day) if month is not None or i else f"{day.month}/{day.day}"
-            if month is None and day.day == 1 and i:
-                label = f"{day.month}/{day.day}"
+            label = str(day.day)
+            if month is None and day.day == 1 and day != today:
+                label = f"{day.month}/1"  # 週の途中で月が変わるとき
             d.text((x, y + 34), label, font=f(32, day == today), fill=col, anchor="mm")
         for li, ci, cj, e in placed:
             x0, x1 = ci * CW + 8, (cj + 1) * CW - 8
