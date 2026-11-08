@@ -20,6 +20,13 @@ async def main(cid, y, m):
         h = {"Accept": "application/json", "Referer": f"{BASE}/public_calendars/{cid}", "X-TimeTreeA": "web/2.1.0/1.0.0"}
         if tok:
             h["X-CSRF-Token"] = tok.group(1)
+        async with s.get(f"{BASE}/api/v2/public_calendars/{cid}", headers=h) as r:
+            cal = await r.json(content_type=None)
+        pc = cal.get("public_calendar", cal)
+        print("カレンダーの項目名:", sorted(pc.keys()) if isinstance(pc, dict) else type(pc))
+        for k, v in (pc.items() if isinstance(pc, dict) else []):
+            if any(w in k for w in ("label", "color", "categor", "theme")):
+                print("  ", k, "=", json.dumps(v, ensure_ascii=False)[:600])
         async with s.get(f"{BASE}/api/v2/public_calendars/{cid}/public_events",
                          params={"year": y, "month": m}, headers=h) as r:
             print("HTTP", r.status)
@@ -30,7 +37,7 @@ async def main(cid, y, m):
     print("項目名:", keys)
     for e in evs[:8]:
         small = {k: v for k, v in e.items() if k in ("title", "start_at", "end_at", "all_day", "start_timezone")
-                 or "recur" in k or "rrule" in k or "repeat" in k or "color" in k or "label" in k}
+                 or "recur" in k or "rrule" in k or "repeat" in k or "color" in k or "label" in k or "categor" in k}
         print(json.dumps(small, ensure_ascii=False)[:400])
 
 
