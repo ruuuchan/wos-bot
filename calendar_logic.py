@@ -145,9 +145,18 @@ def parse_event(e, lo=None, hi=None):
 
 # ---------- 画像 ----------
 BG, GRID, TXT, SUB = "#ffffff", "#e6e6e6", "#222222", "#9a9a9a"
-RED, BLUE = "#d64541", "#2d5be3"
+RED, BLUE = "#d54a43", "#294cca"
+
+
+def is_holiday(day):
+    """日本の祝日（jpholiday が入っていれば）"""
+    try:
+        import jpholiday
+        return jpholiday.is_holiday(day)
+    except Exception:
+        return False
 BIG = ["氷原支配者", "同盟総動員", "最強王国", "SvS", "同盟大作戦", "王城決戦", "大統領"]
-COLORS = {"red": "#d64a43", "yellow": "#f2c14e", "brown": "#968177"}
+COLORS = {"red": "#d54a43", "yellow": "#f4c24f", "brown": "#918079", "purple": "#a48acb"}
 
 
 def event_color(ev):
@@ -158,6 +167,8 @@ def event_color(ev):
         return COLORS["red"]
     if "砦" in t:
         return COLORS["yellow"]
+    if "解放" in t:
+        return COLORS["purple"]
     return COLORS["brown"]
 
 
@@ -214,10 +225,10 @@ def render_weeks(events, weeks, title="", today=None, month=None):
         for i, day in enumerate(wk):
             x = i * CW + CW // 2
             other = month is not None and day.month != month
-            col = RED if i == 6 else BLUE if i == 5 else TXT
+            col = RED if i == 6 or is_holiday(day) else BLUE if i == 5 else TXT
             if day == today:
                 d.rectangle([i * CW, y + 1, (i + 1) * CW, y + rh], fill="#f2f2f2")
-                d.ellipse([x - 26, y + 8, x + 26, y + 60], fill=TXT)
+                d.ellipse([x - 26, y + 8, x + 26, y + 60], fill=RED)
                 col = "#ffffff"
             elif other:
                 col = "#cfd8f5" if i == 5 else "#f2b8b6" if i == 6 else "#bbbbbb"
@@ -232,8 +243,11 @@ def render_weeks(events, weeks, title="", today=None, month=None):
             d.rounded_rectangle([x0, yy, x1, yy + LANE - 8], 8, fill=c)
             label = e["title"] if not e["time"] else f"{e['time']} {e['title']}"
             fc = "#ffffff"
-            font = f(28, True)
-            txt = clean(label, d, font, x1 - x0 - 16)
+            size = 28  # 入りきらないときは少し小さくする
+            while size > 20 and d.textlength(label, font=f(size, True)) > x1 - x0 - 16:
+                size -= 1
+            font = f(size, True)
+            txt = clean(label, d, font, x1 - x0 - 12)
             d.text(((x0 + x1) / 2, yy + (LANE - 8) / 2), txt, font=font, fill=fc, anchor="mm")
         y += rh
     d.line([0, y, W, y], fill=GRID, width=2)
