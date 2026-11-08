@@ -20,7 +20,7 @@ from discord import app_commands
 import db
 import calendar_logic as C
 
-DEFAULT_CAL = "a_4297"
+DEFAULT_CAL = "a_4297,b_4297"  # 複数のカレンダーはカンマ区切り（予定は1枚にまとめて表示）
 COMMANDS = ["カレンダー", "今週の予定", "カレンダー設定", "週間カレンダー自動投稿", "週間カレンダー停止",
             "月間カレンダー自動投稿", "月間カレンダー停止"]
 
@@ -31,7 +31,10 @@ def cal_of(gid):
 
 def link_view(cal_id):
     v = discord.ui.View()
-    v.add_item(discord.ui.Button(label="TimeTreeで開く", url=f"https://timetreeapp.com/public_calendars/{cal_id}"))
+    ids = [c for c in cal_id.split(",") if c][:5]
+    for i, c in enumerate(ids, 1):
+        label = "TimeTreeで開く" if len(ids) == 1 else f"TimeTreeで開く（{i}）"
+        v.add_item(discord.ui.Button(label=label, url=f"https://timetreeapp.com/public_calendars/{c}"))
     return v
 
 
@@ -44,9 +47,17 @@ async def events_around(cal_id, days):
     y0, m0 = months[0]
     y1, m1 = months[-1]
     want = {(y0, m0 - 1) if m0 > 1 else (y0 - 1, 12), *months, (y1, m1 + 1) if m1 < 12 else (y1 + 1, 1)}
-    evs = []
-    for yy, mm in sorted(want):
-        evs += await C.fetch_month(cal_id, yy, mm)
+    evs, errors = [], 0
+    ids = [c for c in cal_id.split(",") if c]
+    for cid in ids:
+        for yy, mm in sorted(want):
+            try:
+                evs += await C.fetch_month(cid, yy, mm)
+            except Exception as e:
+                print(f"カレンダー取得エラー {cid} {yy}/{mm}: {e!r}")
+                errors += 1
+    if errors and not evs:
+        raise RuntimeError("どのカレンダーも読み込めませんでした")
     seen, uniq = set(), []
     for e in evs:
         k = (e["title"], e["start"], e["end"])
@@ -162,15 +173,18 @@ def setup(tree: app_commands.CommandTree, admin):
                                         view=link_view(cal_id), ephemeral=not 全員に見せる)
 
     @tree.command(name="カレンダー設定", description="【運営】表示するTimeTree公開カレンダーのURLを変える")
-    @app_commands.describe(url="TimeTree公開カレンダーのURL（例：https://timetr.ee/p/a_4297）")
+    @app_commands.describe(url="TimeTree公開カレンダーのURL。複数ならスペースかカンマで区切る（例：https://timetr.ee/p/a_4297 https://timetr.ee/p/b_4297）")
     @app_commands.guild_only()
     @admin
     async def cmd_calendar_setting(interaction: discord.Interaction, url: str):
-        cid = C.calendar_id(url)
-        if not cid:
+        import re
+        ids = [C.calendar_id(u) for u in re.split(r"[\s,、]+", url.strip()) if u]
+        ids = [i for i in ids if i]
+        if not ids:
             return await interaction.response.send_message("URLが読み取れませんでした", ephemeral=True)
-        db.set_setting(interaction.guild_id, "timetree", cid)
-        await interaction.response.send_message(f"✅ カレンダーを {cid} に設定しました", ephemeral=True)
+        db.set_setting(interaction.guild_id, "timetree", ",".join(dict.fromkeys(ids)))
+        await interaction.response.send_message(f"✅ カレンダーを {'、'.join(dict.fromkeys(ids))} に設定しました（予定は1枚にまとめて表示）",
+                                                ephemeral=True)
 
     @tree.command(name="今週の予定", description="今週（または来週）のイベント予定を表示")
     @app_commands.choices(週=[app_commands.Choice(name="今週", value=0), app_commands.Choice(name="来週", value=1)])
