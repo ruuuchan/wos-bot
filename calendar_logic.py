@@ -118,11 +118,15 @@ def parse_event(e, lo=None, hi=None):
         ed -= dt.timedelta(days=1)
     if ed < sd:
         ed = sd
-    color = None
-    for k in ("color", "label_color"):
-        v = e.get(k)
+    color = None  # TimeTreeで付けた色（数値 4047560 → #3dc2c8 のように変換）
+    lab = e.get("public_calendar_label") or {}
+    for v in (e.get("color"), lab.get("color") if isinstance(lab, dict) else None, e.get("label_color")):
+        if isinstance(v, int) and 0 < v <= 0xFFFFFF:
+            color = "#%06x" % v
+            break
         if isinstance(v, str) and re.fullmatch(r"#?[0-9A-Fa-f]{6}", v):
             color = "#" + v.lstrip("#")
+            break
     base = {"title": e.get("title") or "", "color": color,
             "time": None if e.get("all_day") else s.strftime("%H:%M")}
     span = ed - sd

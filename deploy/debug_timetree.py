@@ -35,10 +35,13 @@ async def main(cid, y, m):
     print("paging:", data.get("paging"), " 件数:", len(evs))
     keys = sorted({k for e in evs for k in e})
     print("項目名:", keys)
-    for e in evs[:8]:
-        small = {k: v for k, v in e.items() if k in ("title", "start_at", "end_at", "all_day", "start_timezone")
-                 or "recur" in k or "rrule" in k or "repeat" in k or "color" in k or "label" in k or "categor" in k}
-        print(json.dumps(small, ensure_ascii=False)[:400])
+    import datetime as dt
+    f = lambda x: dt.datetime.fromtimestamp(x / 1000, dt.timezone.utc).strftime("%m/%d(%a) %H:%M")
+    for e in evs:
+        col = e.get("color")
+        print(f"{e.get('title')}｜終日={e.get('all_day')}｜tz={e.get('start_timezone')}｜"
+              f"{f(e['start_at'])} → {f(e['end_at'])} (UTC)｜色={('#%06x' % col) if isinstance(col, int) else col}｜"
+              f"{e.get('recurrences')}")
 
 
 asyncio.run(main(sys.argv[1], int(sys.argv[2]), int(sys.argv[3])))
